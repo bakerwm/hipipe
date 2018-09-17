@@ -7,6 +7,13 @@ A group of scripts for HiSeq data, including demx, trimming, alignment etc.
 
 ## Usage
 
+```
+$ python <path_to_hipipe>/hipipe-trim.py
+$ python <path_to_hipipe>/hipipe-align.py
+$ python <path_to_hipipe>/hipipe-demx.py
+```
+
+
 See `foo.py` for example:
 
 ```
