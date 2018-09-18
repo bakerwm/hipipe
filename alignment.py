@@ -106,19 +106,21 @@ class Alignment(object):
 
 
 
-    def init_dir(self, fq, idx):
+    def init_dir(self, fq, idx, fq_path=None):
         """Prepare directory, file name for each fastq and index"""
         assert os.path.exists(fq)
         assert isinstance(idx, str)
         args = self.args
+        if fq_path is None:
+            fq_path = args['path_out']
 
         fq_prefix = file_prefix(fq)[0] #
         fq_prefix = re.sub('\.clean|\.nodup|\.cut', '', fq_prefix)
         fq_type = seq_type(fq)
         idx_name = os.path.basename(idx)
-
-        fq_path = os.path.join(args['path_out'], fq_prefix)
+        # fq_path = os.path.join(args['path_out'], fq_prefix)
         assert is_path(fq_path) # create sub-directory
+        
         map_suffix = os.path.join(fq_path, '%s.map_%s' % (fq_prefix, idx_name))
         unmap_suffix = os.path.join(fq_path, '%s.not_%s' % (fq_prefix, idx_name))
         map_bam = map_suffix + '.bam'
@@ -164,12 +166,12 @@ class Alignment(object):
 
 
 
-    def bowtie_se(self, fq, idx):
+    def bowtie_se(self, fq, idx, fq_path=None):
         """Run bowtie, default kwargs"""
         assert os.path.exists(fq)
         assert isinstance(idx, str)
         args = self.args
-        prefix, map_bam, map_bed, map_log, unmap_fq = self.init_dir(fq, idx)
+        prefix, map_bam, map_bed, map_log, unmap_fq = self.init_dir(fq, idx, fq_path)
 
         para_fq = '-f' if seq_type(fq) == 'fasta' else '-q'
         para_bowtie = '-v 2 -m 1' if args['unique_only'] is True else '-v 2 -k 1'
@@ -196,12 +198,12 @@ class Alignment(object):
 
 
 
-    def bowtie2_se(self, fq, idx):
+    def bowtie2_se(self, fq, idx, fq_path=None):
         """Run bowtie2, default kwargs"""
         assert os.path.exists(fq)
         assert isinstance(idx, str)
         args = self.args
-        prefix, map_bam, map_bed, map_log, unmap_fq = self.init_dir(fq, idx)
+        prefix, map_bam, map_bed, map_log, unmap_fq = self.init_dir(fq, idx, fq_path)
 
         para_fq = '-f' if seq_type(fq) == 'fasta' else '-q'
         para_bowtie2 = '-q 10' if args['unique_only'] is True else ''
@@ -228,12 +230,12 @@ class Alignment(object):
 
 
 
-    def star_se(self, fq, idx):
+    def star_se(self, fq, idx, fq_path=None):
         """Run STAR, default kwargs"""
         assert os.path.exists(fq)
         assert isinstance(idx, str)
         args = self.args
-        prefix, map_bam, map_bed, map_log, unmap_fq = self.init_dir(fq, idx)
+        prefix, map_bam, map_bed, map_log, unmap_fq = self.init_dir(fq, idx, fq_path)
 
         para_star = '--outFilterMismatchNoverLmax 0.05 --seedSearchStartLmax 20'
         if args['unique_only'] is True:
@@ -269,14 +271,15 @@ class Alignment(object):
 
 
 
-    def align_se_batch(self, fq, idxes):
+    def align_se_batch(self, fq, idxes, fq_path=None):
         """Run alignment in batch mode, for multiple genome indexes
         one fastq file to mulitple indexes
         """
         assert os.path.exists(fq)
         assert isinstance(idxes, list)
-
         args = self.args
+        if fq_path is None:
+            fq_path = args['path_out']
 
         # choose aligner
         if args['aligner'].lower() == 'star':
@@ -292,7 +295,7 @@ class Alignment(object):
         bam_files = []
         fq_input = fq
         for idx in idxes:
-            bam_map, fq_unmap = align_se(fq_input, idx)
+            bam_map, fq_unmap = align_se(fq_input, idx, fq_path)
             fq_input = fq_unmap
             bam_files.append(bam_map)
 
@@ -311,7 +314,8 @@ class Alignment(object):
             logging.info('mapping: %s ' % fq)
             fq_prefix = file_prefix(fq)[0]
             fq_prefix = re.sub('\.clean|\.nodup|\.cut', '', fq_prefix)
-            bam_files = self.align_se_batch(fq, idxes)
+            fq_path = os.path.join(args['path_out'], fq_prefix)
+            bam_files = self.align_se_batch(fq, idxes, fq_path)
             out_bam_files.append(bam_files) # bam files
             # rep path
             bam_path_out = os.path.dirname(bam_files[0])

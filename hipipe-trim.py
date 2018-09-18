@@ -12,6 +12,10 @@ Trimming reads
 2. trim sliding window of 3'-adapter
 3. trim adapter by multiple times (--times=N)
 4. remove PCR duplicates (--rm-PCR-dup)
+
+to-do:
+1. trim reads from 3', keep maxmium N-nt
+
 """
 
 __author__ = "Ming Wang"
@@ -107,9 +111,9 @@ def main():
                       adapter_sliding=args.adapter_sliding,
                       trim_times=args.trim_times,
                       double_trim=args.double_trim,
-                      qual_min=args.qual_min,
-                      err_rate=args.err_rate,
-                      overlap=args.overlap,
+                      qual_min=args.q,
+                      err_rate=args.e,
+                      overlap=args.O,
                       multi_cores=args.threads,
                       read12=args.read12,
                       rm_untrim=args.rm_untrim,
