@@ -31,6 +31,34 @@ logging.basicConfig(format = '[%(asctime)s] %(message)s',
 
 
 
+def findfiles(which, where='.'):
+    """Returns list of filenames from `where` path matched by 'which'
+    shell pattern. Matching is case-insensitive.
+    # findfiles('*.ogg')
+    """    
+    # TODO: recursive param with walk() filtering
+    rule = re.compile(fnmatch.translate(which), re.IGNORECASE)
+    return [name for name in os.listdir(where) if rule.match(name)]
+
+
+
+def which(program):
+    def is_exe(fpath):
+        return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
+
+    fpath, fname = os.path.split(program)
+    if fpath:
+        if is_exe(program):
+            return program
+    else:
+        for path in os.environ["PATH"].split(os.pathsep):
+            exe_file = os.path.join(path, program)
+            if is_exe(exe_file):
+                return exe_file
+
+    return None
+
+
 ##-------------------------------------------##
 ## formatter
 def nested_dict_values(d):
@@ -502,7 +530,7 @@ def idx_picker(genome, group='genome', path_data=None, aligner='bowtie'):
         path_data = os.path.join(pathlib.Path.home(), 'data', 'genome')
     idx = os.path.join(path_data, genome, aligner + '_index', group)
     if aligner.lower() == 'star':
-        idx = os.path.join(path_data, genome, 'STAR_index')
+        idx = os.path.join(path_data, genome, 'STAR_index', group)
     if is_idx(idx, aligner):
         return idx
     else:
