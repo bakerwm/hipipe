@@ -20,9 +20,6 @@ import pandas as pd
 import pysam
 import pybedtools
 from utils_parser import *
-
-
-# from alignment_parser import Alignment_log, Alignment_stat
 from helper import *
 
 
@@ -83,18 +80,24 @@ class Alignment(object):
         if args['spikein'] == args['genome'] or args['spikein'] is None:
             idxes = []
         else:
-            sp_idx = idx_picker(args['spikein'], path_data=args['path_data'], 
-                                aligner=args['aligner'])
+            sp_idx = idx_picker(
+                args['spikein'], 
+                path_data=args['path_data'], 
+                aligner=args['aligner'])
             idxes = [sp_idx, ]
 
         # genome index
         if args['align_to_rRNA'] is True:
-            sg_idx = idx_grouper(args['genome'], path_data=args['path_data'], 
-                                 aligner=args['aligner'])
+            sg_idx = idx_grouper(
+                args['genome'],
+                path_data=args['path_data'], 
+                aligner=args['aligner'])
             idxes.extend(sg_idx) # add genome list
         else:
-            sg_idx = idx_picker(args['genome'], path_data=args['path_data'], 
-                                aligner=args['aligner'])
+            sg_idx = idx_picker(
+                args['genome'], 
+                path_data=args['path_data'], 
+                aligner=args['aligner'])
             idxes.append(sg_idx) # add genome item
 
         # remove possible duplicates, zero-records
