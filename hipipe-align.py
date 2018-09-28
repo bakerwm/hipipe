@@ -14,7 +14,8 @@ __email__ = "wangm08@hotmail.com"
 __date__ = "2018-03-21"
 __version__ = "0.1"
 
-
+import os
+import pathlib
 import argparse
 from alignment import Alignment, Alignment_log, Alignment_stat
 
@@ -35,7 +36,7 @@ def get_args():
     parser.add_argument('-n', required=True, metavar='NAME',
         help='Name of the experiment')
     parser.add_argument('-g', required=True, default='hg19', 
-        metavar='GENOME', choices=['dm3', 'hg19', 'hg38', 'mm10'],
+        metavar='GENOME', choices=['dm3', 'hg19', 'hg38', 'mm10', 'mm9'],
         help='Reference genome : dm3, hg19, hg39, mm10, default: hg19')
     parser.add_argument('-k', default=None, 
         metavar='Spike-in', choices=[None, 'dm3', 'hg19', 'hg38', 'mm10'],
@@ -76,3 +77,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+# EOF
