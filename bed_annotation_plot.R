@@ -3,9 +3,9 @@
 
 args <- commandArgs(trailingOnly=TRUE)
 if (length(args) == 2) {
-    fn <- 'aaa.anno'
-    fout <- 'aaa.pdf'
-}else {
+    fn <- args[1]
+    fout <- args[2]
+} else {
     print("Usage: bed_annotation_plot.R <anno.stat> <out.pdf>")
     stop('At lease two argument')
 }
@@ -13,7 +13,7 @@ if (length(args) == 2) {
 library(goldclipReport)
 library(dplyr)
 library(ggplot2)
-df <- AnnoParser(fn)
+df <- AnnoParser(fn, dm3_basic = TRUE)
 p <- BedAnnoBarplot(df, type="percentage", category='peaks')
 
 # define width
