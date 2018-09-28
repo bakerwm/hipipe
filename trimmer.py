@@ -62,7 +62,7 @@ class Trimmer(object):
                  adapter_sliding=False, trim_times=1, double_trim=False, 
                  qual_min=20, err_rate=0.1, overlap=3, multi_cores=1, read12=1, 
                  rm_untrim=False, rm_dup=False, cut_before_trim='0', 
-                 cut_after_trim='0', overwrite=False):
+                 cut_after_trim='0', trim_to_length=0, overwrite=False):
         """Process parameters"""
         self.fq = fq
         self.adapter3 = adapter3
@@ -81,24 +81,10 @@ class Trimmer(object):
         self.rm_dup = rm_dup
         self.cut_before_trim = cut_before_trim
         self.cut_after_trim = cut_after_trim
+        self.trim_to_length = trim_to_length
         self.overwrite = overwrite
         ## wrapper parameters
         self.args = self.get_args()
-        # fq_prefix, fq_clean, fq_log, fq_untrim = self.init_dir()
-        # if rm_dup is True and self.cut_after_trim == '0':
-        #     self.fq_clean = self.run()
-        #     self.fq_clean = self.rm_duplicate()
-        #     self.fq_clean = self.trim_ends()
-        # elif rm_dup is True:
-        #     self.fq_clean = self.run()
-        #     self.fq_clean = self.rm_duplicate()
-        # elif not self.cut_after_trim == '0':
-        #     self.fq_clean = self.run()
-        #     self.fq_clean = self.trim_ends()
-        # else:
-        #     self.fq_clean = self.run()
-        #     # self.fq_clean = fq_clean
-        
 
 
     def get_args(self):
@@ -120,6 +106,7 @@ class Trimmer(object):
                 'rm_dup' : self.rm_dup,
                 'cut_before_trim' : self.cut_before_trim,
                 'cut_after_trim' : self.cut_after_trim,
+                'trim_to_length' : self.trim_to_length,
                 'overwrite' : self.overwrite
                 }
         # check
@@ -140,7 +127,11 @@ class Trimmer(object):
         assert isinstance(args['rm_dup'], bool)
         assert isinstance(args['cut_before_trim'], str)
         assert isinstance(args['cut_after_trim'], str)
+        assert isinstance(args['trim_to_length'], int)
         assert isinstance(args['overwrite'], bool)
+        if args['trim_to_length'] > 0 and args['trim_to_length'] < args['len_min']:
+            assert ValueError('--trim-to-length %s should be greater than -m %s' % 
+                              (args['trim_to_length'], args['len_min']))
         return args
 
 
@@ -363,10 +354,46 @@ class Trimmer(object):
                                 continue # skip short reads
                             fq_seq = fq_seq[trim_5:trim_3] if(trim_3 < 0) else fq_seq[trim_5:]
                             fq_qual = fq_qual[trim_5:trim_3] if(trim_3 < 0) else fq_qual[trim_5:]
+                            # trim to length
+                            if args['trim_to_length'] > args['len_min']:
+                                n_right = min([args['trim_to_length'], len(fq_seq)])
+                                fq_seq = fq_seq[:n_right]
+                                fq_qual = fq_qual[:n_right]
                             ff.write('\n'.join([fq_id, fq_seq, fq_plus, fq_qual]) + '\n')
                         except StopIteration:
                             break
         return fq_clean
+
+
+
+    def trim_ends2(self, fq_in=None):
+        """Trim reads from right, save reads with maximum length"""
+        args = self.args
+        if fq_in is None:
+            fq_in = args['fq']
+        fq_prefix, fq_clean, fq_log, fq_untrim = self.init_dir(fq_in)
+
+        if args['trim_to_length'] == 0:
+            pass
+        elif args['trim_to_length'] < args['len_min']:
+            raise ValueError('--trim-to-length %s should be greater than -m %s' % 
+                              (args['trim_to_length'], args['len_min']))
+        else:
+            with open(fq_in, 'rt') as fi, open(fq_clean, 'wt') as ff:
+                while True:
+                    try:
+                        fq_id, fq_seq, fq_plus, fq_qual = [next(fi).strip(),
+                                                               next(fi).strip(),
+                                                               next(fi).strip(),
+                                                               next(fi).strip()]
+                        n_right = min([args['trim_to_length'], len(fq_seq)])
+                        fq_seq = fq_seq[:n_right]
+                        fq_qual = fq_qual[:n_right]
+                        ff.write('\n'.join([fq_id, fq_seq, fq_plus, fq_qual]) + '\n')
+                    except StopIteration:
+                        break
+        return fq_clean
+
 
 
 
@@ -386,11 +413,25 @@ class Trimmer(object):
             fq_clean = fq1
         elif args['rm_dup'] is True:
             fq1 = self.rm_duplicate(fq_clean)
-            os.remove(fq_clean)
-            fq_clean = fq1
+            if args['trim_to_length'] > args['len_min']:
+                fq2 = self.trim_ends2(fq1)
+                os.remove(fq_clean)
+                os.remove(fq1)
+                fq_clean = fq2
+            else:
+                os.remove(fq1)
+                fq_clean = fq1
         else:
-            pass
+            if args['trim_to_length'] > args['len_min']:
+                fq1 = self.trim_ends2(fq_clean)
+                os.remove(fq_clean)
+                fq_clean = fq1
+
             # raise ValueError('unknown --rm-dup %s, --cut-after-trim %s' % (
             #                   args['rm_dup'], args['cut_after_trim']))
+
         return fq_clean
 
+
+
+## EOF
