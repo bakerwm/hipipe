@@ -96,7 +96,11 @@ def get_args():
         help='cut bases after trimming adapter, Number of bases to cut \
               from each read, plus on 5-prime end, minus on 3-prime end, \
               could be single, or double numbers, eg: 3 or -4 or 3,-4, \
-              default [0]')    
+              default [0]')
+    parser.add_argument('--trim-to-length', default=0, metavar='max-length',
+        dest='trim_to_length', type=int,
+        help='trim reads from right, save the specific length of reads. \
+              default: [0], 0=the full length')
     parser.add_argument('--overwrite', action='store_true',
         help='if spcified, overwrite exists file')
     args = parser.parse_args()
@@ -120,6 +124,7 @@ def main():
                       rm_dup=args.rm_dup,
                       cut_before_trim=args.cut_before_trim,
                       cut_after_trim=args.cut_after_trim,
+                      trim_to_length=args.trim_to_length,
                       overwrite=args.overwrite).run()
 
 
