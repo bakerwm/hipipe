@@ -80,7 +80,6 @@ class Cutadapt_log(object):
         return _out
 
 
-
 class Json_file(object):
     """Parsing Json and dict file"""
 
@@ -128,10 +127,6 @@ class Json_file(object):
             json.dump(fn, ff, indent=4, sort_keys=True)
 
 
-
-
-
-
 ##--------------------##
 ## figure 1
 def trim_wrapper(path, smp_name='demo'):
@@ -159,9 +154,6 @@ def trim_wrapper(path, smp_name='demo'):
     df.insert(0, smp_name, df.sum(axis = 1))
     return df
 
-# path_trim = os.path.join(path_out, 'input_reads')
-# df = trim_wrapper(path_trim, smp_name)
-# print(df)
 
 
 ## mapping pct
