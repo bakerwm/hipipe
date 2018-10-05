@@ -19,7 +19,7 @@ import logging
 import pandas as pd
 import pysam
 import pybedtools
-from utils_parser import *
+from utils_parser import Json_file
 from helper import *
 
 
@@ -635,24 +635,29 @@ class Alignment_log(object):
 class Alignment_stat(object):
     """Parse mapping reads in directory
     1. for each rep bam, parse json files, 
-    2. merged bam files, count bam lines
+    del. 2. merged bam files, count bam lines
+    2. merge replicates
     """
-
     def __init__(self, path):
         self.path = path
+
         if isinstance(path, Alignment_stat):
             self.stat = path.stat
-        elif isinstance(path, dict):
+        elif isinstance(path, pd.DataFrame):
             self.stat = path
-        elif os.path.exists(path):
-            if not self._get_json_files() is False:
-                self.stat = self.count_json_files()
-            elif not self._get_bam_files() is False:
-                self.stat = self.count_bam_files()
+        elif os.path.isdir(path):
+            json_files = self._list_files('.json')
+            bam_files = self._list_bam_files()
+            if not json_files is None:
+                self.stat = self.align_log_stat()
+            elif not bam_files is None:
+                # self.stat = self.bam_stat()
+                self.stat = self.merge_rep_stat()
             else:
-                raise ValueError('No bam and json files found: %s' % path)
+                raise ValueError('BAM or json files not found: %s' % path)
         else:
             raise ValueError('unknown format')
+
 
 
     def _is_non_empty(self, fn):
@@ -663,80 +668,146 @@ class Alignment_stat(object):
             return False
 
 
-    def _get_json_files(self):
+
+    def _list_files(self, suffix='*'):
+        """List json files in mapping directory"""
         path = self.path
-        j_files = sorted(glob.glob(path + '/*.json'), key=len)
-        j_files = [f for f in j_files if self._is_non_empty(f)] # not empty files
-        if len(j_files) > 0:
-            return j_files
+        json_files = [os.path.join(path, f) for f in os.listdir(path) 
+            if f.endswith(suffix)]
+        json_files = [f for f in json_files if self._is_non_empty(f) is True]
+        if len(json_files) > 0:
+            return json_files
         else:
-            # raise ValueError('No json files detected in: %s' % path)
-            return False
+            return None
 
 
-    # parse *.json files
-    def count_json_files(self):
-        path = self.path
-        prefix = os.path.basename(path) # sample name
-        j_files = self._get_json_files() # each group
-        df = pd.DataFrame(columns=['name', 'group', 'count'])
-        for j in j_files:
-            dd = Json_file(j).stat # count
-            # group            
-            group = j.split('.')[-3] # group name, *map_genome.bowtie.json
-            group = group.split('_')[1] # 
-            # check spike-in
-            if j_files.index(j) == 0 and group == 'genome' and len(j_files) > 1:
-                group = 'spikein'
-            num_map = dd['map']
-            df = df.append(pd.DataFrame([[prefix, group, num_map]],
-                           columns = ['name', 'group', 'count']),
-                           ignore_index=True)
-        # unmap reads
-        dd = Json_file(j_files[-1]).stat
-        unmap = dd['unmap']
-        df = df.append(pd.DataFrame([[prefix, 'unmap', unmap]],
-                       columns=['name', 'group', 'count']),
-                       ignore_index=True)
+
+    def _json_log_reader(self, fn):
+        """Parse json file, save as DataFrame"""
+        # fn_name = os.path.splitext(os.path.basename(fn))[0]
+        fn_name = os.path.basename(fn)
+        group, aligner = fn.split('.')[-3:-1]
+        group = re.sub('^map_', '', group)
+        dd = Json_file(fn).stat # dict of count
+        # total, unique, multiple, unmap
+        df = pd.DataFrame(data=[list(dd.values())], columns=list(dd.keys()))
+        df.pop('map') # drop "map" column
+        df.index = [fn_name]
         return df
 
 
-    def _get_bam_files(self):
+
+    # directory of replicate fastq file contains *.json file
+    def align_log_stat(self):
+        """Extract alignment log from one directory"""
+        path = self.path.rstrip('/')
+        json_files = self._list_files('.json')
+
+        if len(json_files) == 0:
+            return None
+        elif len(json_files) == 1:
+            # map_genome
+            df = self._json_log_reader(log_files[0])
+            return df
+        else:
+            json_files = sorted(json_files, key=len)
+            # map to genome
+            dfg = self._json_log_reader(json_files[-1])
+            dfg = dfg.loc[:, ['unique', 'multiple', 'unmap']]
+
+            # map to others
+            frames = []
+            for json_file in json_files[:-1]:
+                df = self._json_log_reader(json_file)
+                log_name = df.index.tolist()[0] # first one
+                group = log_name.split('.')[-3] # map_group
+                group = re.sub('map_', '', group)
+                df = df.assign(mapped=df.unique + df.multiple)
+                df.columns.values[-1] = group # rename column
+                frames.append(df.loc[:, group])
+            # all rows
+            dfx = pd.concat(frames, axis=1)
+            dfx.index = list(dfg.index.values)
+           
+            # all stat
+            df = pd.concat([dfx, dfg], axis=1)
+            df = df.assign(total=pd.Series(df.sum(axis=1)).values)
+
+            # index
+            df.index = [os.path.basename(path)]
+            return df
+
+
+
+    # directory of merged fastq, count bam file
+    # to-do: summary replicates (except unmap)
+    def _list_bam_files(self):
+        """Skip sym-link file"""
         path = self.path
-        bam_files = sorted(glob.glob(path + '/*.bam'), key=len)
-        bam_files = [f for f in bam_files if self._is_non_empty(f) 
-                     and not os.path.islink(f)] # not empty files
+        bam_files = [b for b in sorted(self._list_files('.bam'), key=len) 
+            if self._is_non_empty(b) and not os.path.islink(b)]
         if len(bam_files) > 0:
             return bam_files
         else:
-            raise ValueError('No .bam files found in: %s' % path)
+            return None
 
 
-    # count bam files
-    def count_bam_files(self):
-        path = self.path
-        prefix = os.path.basename(path)
-        bam_files = self._get_bam_files()
-        df = pd.DataFrame(columns=['name', 'group', 'count'])
-        for b in bam_files:
-            b_cnt = pysam.AlignmentFile(b, 'rb').count()
-            group = b.split('.')[-2] # group name*.map_genome.bam
-            group = group.split('_')[1] # reference name
-            if bam_files.index(b) == 0 and group == 'genome' and len(bam_files) > 1:
-                group = 'spikein'
-            df = df.append(pd.DataFrame([[prefix, group, b_cnt]],
-                           columns=['name', 'group', 'count']),
-                           ignore_index=True)
+
+    # def bam_stat(self):
+    #     path = self.path
+    #     prefix = os.path.basename(path)
+    #     bam_files = self._list_bam_files()
+        
+    #     frames = []
+    #     for bam in bam_files:
+    #         bam_count = pysam.AlignmentFile(bam, 'rb').count()
+    #         group = bam.split('.')[-2] # map_group
+    #         group = re.sub('map_', '', group)
+    #         if len(bam_files) > 1 and bam_files.index(bam) == 0 and group == 'genome':
+    #             group = 'spikein'
+    #         df = pd.DataFrame({'data': bam_count}, index=[prefix])
+    #         df.columns = [group]
+    #         frames.append(df)
+    #     # merge
+    #     df_all = pd.concat(frames, axis=1)
+    #     return df_all
+
+
+
+    def merge_rep_stat(self):
+        """Stat reads for merged sample
+        combine stat of replicates
+        search the parent_directory of merged_dir
+        """
+        path = self.path.rstrip('/')
+        parent_path = os.path.dirname(path)
+        rep_dirs = [os.path.join(parent_path, f) for f in os.listdir(parent_path)]
+        rep_dirs = [f for f in rep_dirs if os.path.isdir(f)]
+
+        frames = []
+        for rep_dir in rep_dirs:
+            json_files = [os.path.join(rep_dir, f) for f in os.listdir(rep_dir)
+                if f.endswith('.json')]
+            if len(json_files) > 0:
+                frames.append(Alignment_stat(rep_dir).stat)
+            else:
+                continue # next
         # output
-        return df
+        if len(frames) > 0:
+            # rep
+            df = pd.concat(frames, axis=0)
+            rep_names = list(df.index.values)
+            rep_suffix = str_common(rep_names, suffix=True)
+            df.index = [f.rstrip(rep_suffix) for f in rep_names]
+            # merge
+            df_merge = pd.DataFrame(data=[df.sum(axis=0)], columns=list(df.columns.values))
+            df_merge.index = [os.path.basename(path)]
+            # return pd.concat([df, df_merge], axis=0)
+            return df_merge
+        else:
+            logging.error('%10s | not contain mapping files: %s' % ('failed', path))
+            return None
 
-
-    def _tmp(self):
-        """Create a temp file"""
-        tmpfn = tempfile.NamedTemporaryFile(prefix='tmp',
-                                            suffix='.csv',
-                                            delete=False)
-        return tmpfn.name
 
 
     def saveas(self, _out=None):
@@ -746,15 +817,17 @@ class Alignment_stat(object):
             prefix = os.path.basename(path)
             _out = os.path.join(os.path.dirname(path),
                                 prefix + '.mapping_stat.csv')
-        df = self.stat        
+        df = self.stat
+        df = df.reset_index()
 
-        default_kwargs = dict(sep='\t', header=False, index=False)
+        default_kwargs = dict(sep='\t', header=True, index=False)
         if isinstance(_out, io.TextIOWrapper):
             print(df.to_string(index=False, header=False, justify='left'))
         else:
             df.to_csv(_out, **default_kwargs)
         
         return _out
+
 
 
 ## EOF
