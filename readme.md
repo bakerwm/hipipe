@@ -2,6 +2,69 @@
 
 A group of scripts for HiSeq data, including demx, trimming, alignment etc.
 
+
+## RNAseq-pipeline
+
++ 1. trimming
+
+NSR library: cut 6 nt at both ends
+
+```
+$ hipipe-trim.py -i in.fq -o path_out
+```
+
++ 2. mapping
+
+keep both unique, multiple reads
+
+```
+$ hipipe-align.py -i in.clean.fq -o path_out -n smp -g dm3
+```
+
+**Fruitfly**
+
+  - a. map to genome, STAR (dm3)  
+  - b. map to transposon consensus  
+  - c. featureCount, quantification  
+  - d. DESeq2 analysis (from matrix)  
+  - e. make plots: scatter plot, MA plot, volcano plot  
+  - f. scatter plot: RPM
+  - g. summary report:
+       trimming report: raw, too-short, clean
+       mapping report: unique, multiple, MT_trRNA, unmap
+
++ 3. view
+
+Create bigWig for merged samples.
+
+
+## ChIPseq-pipeline
+
++ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## Installation
 
 
