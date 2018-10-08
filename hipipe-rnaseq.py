@@ -70,6 +70,9 @@ def get_args():
     parser.add_argument('-k', default=None, 
         metavar='Spike-in', choices=[None, 'dm3', 'hg19', 'hg38', 'mm10'],
         help='Spike-in genome : dm3, hg19, hg38, mm10, default: None')
+    parser.add_argument('-x', nargs='+', metavar='align_index',
+        help='Provide extra alignment index(es) for alignment, support multiple\
+        indexes. eg. Transposon, tRNA, rRNA and so on.')
     parser.add_argument('--gtf', required=True, 
         help='genome annotation file in GTF format, from ensembl')
     parser.add_argument('-A', metavar='Control_NAME', default=None,
@@ -92,8 +95,6 @@ def get_args():
     parser.add_argument('--align-to-rRNA', dest='align_to_rRNA',
         action='store_true',
         help='if specified, align to rRNA before genome')
-    # parser.add_argument('-s', metavar='strandness', type=int, default=1,
-    #     help='Strandness, 0=not, 1=forward, 2=reverse, default: 0')
     parser.add_argument('--bin-size', dest='bin_size', metavar='binsize', 
         type=int, default=50,
         help='binsize of bigWig, default: 50')
@@ -111,7 +112,8 @@ def prepare_project(path):
     """Prepare subdirs for project"""
     # assert os.path.isdir(path)
     assert isinstance(path, str)
-    subdirs = ['genome_mapping', 'count', 'bigWig', 'de_analysis', 'report', 'src']
+    subdirs = ['genome_mapping', 'count', 'bigWig', 'de_analysis', 'report', 
+               'transposon_analysis', 'src']
     prj_dirs = [os.path.join(path, f) for f in subdirs]
     tmp = [is_path(f) for f in prj_dirs]
     # create dict
@@ -237,7 +239,6 @@ def main():
     ctl_prefix = ctl_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
     if args.A is None:
         args.A = ctl_prefix
-    # ctl_path = os.path.join(args.o, subdirs[0], args.A)
     ctl_path = os.path.join(prj_path['genome_mapping'], args.A)
     ctl_bam_files = Alignment(
         fqs=ctl_fqs, 
@@ -258,7 +259,6 @@ def main():
     tre_prefix = tre_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
     if args.B is None:
         args.B = tre_prefix
-    # tre_path = os.path.join(args.o, subdirs[0], args.B)
     tre_path = os.path.join(prj_path['genome_mapping'], args.B)
     tre_bam_files = Alignment(
         fqs=tre_fqs, 
@@ -274,33 +274,34 @@ def main():
         overwrite=args.overwrite).run()
 
 
-    ## create bigWig files ##
+    # ## create bigWig files ##
     map_bam_files = ctl_bam_files + tre_bam_files
-    bw_path = prj_path['bigWig']
-    for bam in map_bam_files:
-        bam2bigwig(
-            bam=bam, 
-            genome=args.g, 
-            path_out=bw_path, 
-            strandness=args.s, 
-            binsize=args.bin_size, 
-            overwrite=args.overwrite)
+    # bw_path = prj_path['bigWig']
+    # for bam in map_bam_files:
+    #     bam2bigwig(
+    #         bam=bam, 
+    #         genome=args.g, 
+    #         path_out=bw_path, 
+    #         strandness=args.s, 
+    #         binsize=args.bin_size, 
+    #         overwrite=args.overwrite)
 
 
     ## count ##
     count_path = prj_path['count']
-    count_file = os.path.join(count_path, 'count.txt')    
+    count_file = os.path.join(count_path, 'count.txt')
     # only kepp replicate samples
     map_bam_files = [f for f in map_bam_files if '_rep' in f]
-    count_file = fc_run(args.gtf, map_bam_files, count_file, 
+    count_file = fc_run(args.gtf, map_bam_files, count_file,
         args.s, overwrite=args.overwrite)
+
 
     # ## DE analysis ##
     # using R code #
     # de_run(args.A, args.B, count_file)
     de_path = prj_path['de_analysis']
     run_deseq2 = '/home/wangming/work/wmlib/hipipe/run_deseq2.R'
-    c1 = 'Rscript %s %s %s' % (run_deseq2, count_file, args.o)
+    c1 = '/usr/bin/Rscript %s %s %s' % (run_deseq2, count_file, args.o)
     subprocess.run(shlex.split(c1))
 
 
@@ -318,9 +319,102 @@ def main():
     # de analysis report
     # plots
     # gene lists
-
     # run DE analysis
 
+    # #########################
+    # ## Transposon analysis ##
+    #########################
+    logging.info('## For Transposon analysis ##')
+    te_path = prj_path['transposon_analysis']
+    ## mapping ##
+    te_mapping_path = os.path.join(te_path, 'genome_mapping')
+    assert is_path(te_mapping_path)
+    # control
+    ctl_fqs = [f.name for f in args.a]
+    ctl_prefix = str_common([os.path.basename(f) for f in ctl_fqs])
+    ctl_prefix = ctl_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
+    if args.A is None:
+        args.A = ctl_prefix
+    te_ctl_path = os.path.join(te_mapping_path, args.A)
+    te_ctl_bam_files = Alignment(
+        fqs=ctl_fqs, 
+        path_out=te_ctl_path, 
+        smp_name=args.A,
+        genome=args.g,
+        spikein=args.k,
+        index_ext=args.x,
+        multi_cores=args.p,
+        unique_only=args.unique_only, 
+        aligner=args.aligner,
+        align_to_rRNA=args.align_to_rRNA,
+        path_data=args.path_data,
+        overwrite=args.overwrite).run()
+
+    # treatment
+    tre_fqs = [f.name for f in args.b]
+    tre_prefix = str_common([os.path.basename(f) for f in tre_fqs])
+    tre_prefix = tre_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
+    if args.B is None:
+        args.B = tre_prefix
+    te_tre_path = os.path.join(te_mapping_path, args.B)
+    te_tre_bam_files = Alignment(
+        fqs=tre_fqs, 
+        path_out=te_tre_path, 
+        smp_name=args.B,
+        genome=args.g,
+        spikein=args.k,
+        index_ext=args.x,
+        multi_cores=args.p,
+        unique_only=args.unique_only, 
+        aligner=args.aligner,
+        align_to_rRNA=args.align_to_rRNA,
+        path_data=args.path_data,
+        overwrite=args.overwrite).run()
+
+
+    # ## create bigWig files ##
+    te_map_bam_files = te_ctl_bam_files + te_tre_bam_files
+    te_bw_path = os.path.join(te_path, 'bigWig')
+    assert is_path(te_bw_path)
+    # for bam in te_map_bam_files:
+    #     bam2bigwig(
+    #         bam=bam, 
+    #         genome=args.g, 
+    #         path_out=bw_path, 
+    #         strandness=args.s, 
+    #         binsize=args.bin_size, 
+    #         overwrite=args.overwrite)
+
+    # ## count ##
+    te_count_path = os.path.join(te_path, 'count')
+    assert is_path(te_count_path)
+    te_count_file = os.path.join(te_count_path, 'count.txt')
+    # !!!!
+    te_gtf = '/home/data/genome/dm3/dm3_transposon/dm3.transposon.gtf'
+    # only kepp replicate samples
+    te_map_bam_files = [f for f in te_map_bam_files if '_rep' in f]
+    te_count_file = fc_run(te_gtf, te_map_bam_files, te_count_file,
+        args.s, overwrite=args.overwrite)
+
+    # ## DE analysis ##
+    # using R code #
+    # de_run(args.A, args.B, count_file)
+    te_de_path = os.path.join(te_path, 'de_analysis')
+    run_deseq2 = '/home/wangming/work/wmlib/hipipe/run_deseq2.R'
+    c1 = '/usr/bin/Rscript %s %s %s' % (run_deseq2, te_count_file, te_path)
+    subprocess.run(shlex.split(c1))
+
+
+    ## mapping stat ##
+    te_stat_path = os.path.join(te_path, 'report')
+    # map_stat_path = prj_path['report']
+    te_stat_file = os.path.join(te_stat_path, 'mapping.stat')
+    te_ctl_map = map_stat(te_ctl_path)
+    te_tre_map = map_stat(te_tre_path)
+    df_map = pd.concat([te_ctl_map, te_tre_map], axis=0).reset_index()
+    df_map = df_map.sort_values(['index'])
+    print(df_map)
+    df_map.to_csv(te_stat_file, sep='\t', header=True, index=False)
 
 
 
