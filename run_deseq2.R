@@ -30,7 +30,7 @@ library(ggrepel)
 # run DESseq2 analysis
 print("run DESeq2 analysis")
 path_de <- file.path(path_results, "de_analysis")
-DESeq2_for_featureCounts(file_count, "dm3", path_de, pvalue_cutoff = 0.05)
+DESeq2_for_featureCounts(file_count, "dm3", path_de, pvalue_cutoff = 0.1)
 
 # Generate plots
 fs <- list.files(path_de, "transcripts_deseq2.csv", TRUE, TRUE, TRUE)
@@ -39,7 +39,7 @@ print("generate publishable plots")
 print(paste0("found DESeq2 ouptut: ", fs[1]))
 path_pdf <- file.path(path_results, "report")
 tmp <- lapply(fs, function(f) {
-  DESeq2_publish_plot(f, path_pdf, save2pdf = TRUE)
+  DESeq2_publish_plot(f, path_pdf, gene_labels = c("mdg1", "blood", "HeT-A", "Burdock"), save2pdf = TRUE)
 })
 
 # EOF
