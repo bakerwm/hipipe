@@ -28,8 +28,8 @@ class Alignment(object):
 
     def __init__(self, fqs, path_out, smp_name, genome, spikein=None,
                  index_ext=None, multi_cores=1, unique_only=False, 
-                 aligner='bowtie', align_to_rRNA=False, path_data=None, 
-                 overwrite=False):
+                 n_map=0, aligner='bowtie', align_to_rRNA=False, 
+                 path_data=None, overwrite=False):
         self.fqs = fqs
         self.path_out = path_out
         self.smp_name = smp_name
@@ -38,6 +38,7 @@ class Alignment(object):
         self.spikein = spikein
         self.multi_cores = multi_cores
         self.unique_only = unique_only
+        self.n_map = n_map
         self.aligner = aligner
         self.align_to_rRNA = align_to_rRNA
         self.path_data = path_data
@@ -57,6 +58,7 @@ class Alignment(object):
                 'index_ext' : self.index_ext,
                 'multi_cores' : self.multi_cores,
                 'unique_only' : self.unique_only,
+                'n_map' : self.n_map,
                 'aligner' : self.aligner,
                 'align_to_rRNA' : self.align_to_rRNA,
                 'path_data' : self.path_data,
@@ -180,7 +182,12 @@ class Alignment(object):
         prefix, map_bam, map_bed, map_log, unmap_fq = self.init_dir(fq, idx, fq_path)
 
         para_fq = '-f' if seq_type(fq) == 'fasta' else '-q'
-        para_bowtie = '-v 2 -m 1' if args['unique_only'] is True else '-v 2 -k 1'
+        n_map = args['n_map']
+        if args['unique_only'] is True:
+            para_bowtie2 = '-m 1'
+        else:
+            n_map = 1 if n_map == 0 else n_map
+            para_bowtie2 = '-k %s' % n_map
 
         if os.path.exists(map_bam) and args['overwrite'] is False:
             logging.info('file exists, alignment skipped: %s' % map_bam)
@@ -212,7 +219,13 @@ class Alignment(object):
         prefix, map_bam, map_bed, map_log, unmap_fq = self.init_dir(fq, idx, fq_path)
 
         para_fq = '-f' if seq_type(fq) == 'fasta' else '-q'
-        para_bowtie2 = '-q 10' if args['unique_only'] is True else ''
+        n_map = args['n_map']
+        para_bowtie2 = ''
+        if args['unique_only'] is True:
+            para_bowtie2 = '-q 10'
+        else:
+            n_map = 1 if n_map == 0 else n_map
+            para_fq += ' -k %s' % n_map
 
         if os.path.exists(map_bam) and args['overwrite'] is False:
             logging.info('file exists, alignemnt skipped: %s' % map_bam)
@@ -243,9 +256,15 @@ class Alignment(object):
         args = self.args
         prefix, map_bam, map_bed, map_log, unmap_fq = self.init_dir(fq, idx, fq_path)
 
-        para_star = '--outFilterMismatchNoverLmax 0.05 --seedSearchStartLmax 20'
+        n_map = args['n_map']
         if args['unique_only'] is True:
-            para_star = '--outFilterMismatchNoverLmax 0.07 --outFilterMultimapNmax 1'
+            n_map = 1
+        else:
+            n_map = 20 if n_map == 0 else n_map
+        para_star = '--outFilterMultimapNmax %s' % n_map
+
+        # if args['unique_only'] is True:
+        #     para_star = '--outFilterMismatchNoverLmax 0.07 --outFilterMultimapNmax 1'
 
         freader = 'zcat' if is_gz(fq) else '-'
         map_prefix = os.path.splitext(map_bam)[0]
@@ -263,6 +282,8 @@ class Alignment(object):
               --genomeLoad LoadAndRemove \
               --limitBAMsortRAM 10000000000 \
               --outSAMtype BAM SortedByCoordinate \
+              --outFilterMismatchNoverLmax 0.07 \
+              --seedSearchStartLmax 20 \
               --outReadsUnmapped Fastx %s' % (idx, fq, freader, map_prefix,
                                               args['multi_cores'], para_star)
             p1 = subprocess.run(shlex.split(c1))
