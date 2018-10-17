@@ -27,15 +27,18 @@ class Alignment(object):
     """Run alignment using bowtie/bowtie2/STAR, SE reads"""
 
     def __init__(self, fqs, path_out, smp_name, genome, spikein=None,
-                 multi_cores=1, unique_only=False, aligner='bowtie', 
-                 align_to_rRNA=False, path_data=None, overwrite=False):
+                 index_ext=None, multi_cores=1, unique_only=False, 
+                 n_map=0, aligner='bowtie', align_to_rRNA=False, 
+                 path_data=None, overwrite=False):
         self.fqs = fqs
         self.path_out = path_out
         self.smp_name = smp_name
         self.genome = genome
+        self.index_ext = index_ext
         self.spikein = spikein
         self.multi_cores = multi_cores
         self.unique_only = unique_only
+        self.n_map = n_map
         self.aligner = aligner
         self.align_to_rRNA = align_to_rRNA
         self.path_data = path_data
@@ -52,8 +55,10 @@ class Alignment(object):
                 'smp_name' : self.smp_name,
                 'genome' : self.genome,
                 'spikein' : self.spikein,
+                'index_ext' : self.index_ext,
                 'multi_cores' : self.multi_cores,
                 'unique_only' : self.unique_only,
+                'n_map' : self.n_map,
                 'aligner' : self.aligner,
                 'align_to_rRNA' : self.align_to_rRNA,
                 'path_data' : self.path_data,
@@ -177,7 +182,12 @@ class Alignment(object):
         prefix, map_bam, map_bed, map_log, unmap_fq = self.init_dir(fq, idx, fq_path)
 
         para_fq = '-f' if seq_type(fq) == 'fasta' else '-q'
-        para_bowtie = '-v 2 -m 1' if args['unique_only'] is True else '-v 2 -k 1'
+        n_map = args['n_map']
+        if args['unique_only'] is True:
+            para_bowtie2 = '-m 1'
+        else:
+            n_map = 1 if n_map == 0 else n_map
+            para_bowtie2 = '-k %s' % n_map
 
         if os.path.exists(map_bam) and args['overwrite'] is False:
             logging.info('file exists, alignment skipped: %s' % map_bam)
@@ -209,7 +219,13 @@ class Alignment(object):
         prefix, map_bam, map_bed, map_log, unmap_fq = self.init_dir(fq, idx, fq_path)
 
         para_fq = '-f' if seq_type(fq) == 'fasta' else '-q'
-        para_bowtie2 = '-q 10' if args['unique_only'] is True else ''
+        n_map = args['n_map']
+        para_bowtie2 = ''
+        if args['unique_only'] is True:
+            para_bowtie2 = '-q 10'
+        else:
+            n_map = 1 if n_map == 0 else n_map
+            para_fq += ' -k %s' % n_map
 
         if os.path.exists(map_bam) and args['overwrite'] is False:
             logging.info('file exists, alignemnt skipped: %s' % map_bam)
@@ -240,9 +256,15 @@ class Alignment(object):
         args = self.args
         prefix, map_bam, map_bed, map_log, unmap_fq = self.init_dir(fq, idx, fq_path)
 
-        para_star = '--outFilterMismatchNoverLmax 0.05 --seedSearchStartLmax 20'
+        n_map = args['n_map']
         if args['unique_only'] is True:
-            para_star = '--outFilterMismatchNoverLmax 0.07 --outFilterMultimapNmax 1'
+            n_map = 1
+        else:
+            n_map = 20 if n_map == 0 else n_map
+        para_star = '--outFilterMultimapNmax %s' % n_map
+
+        # if args['unique_only'] is True:
+        #     para_star = '--outFilterMismatchNoverLmax 0.07 --outFilterMultimapNmax 1'
 
         freader = 'zcat' if is_gz(fq) else '-'
         map_prefix = os.path.splitext(map_bam)[0]
@@ -260,11 +282,17 @@ class Alignment(object):
               --genomeLoad LoadAndRemove \
               --limitBAMsortRAM 10000000000 \
               --outSAMtype BAM SortedByCoordinate \
+              --outFilterMismatchNoverLmax 0.07 \
+              --seedSearchStartLmax 20 \
               --outReadsUnmapped Fastx %s' % (idx, fq, freader, map_prefix,
                                               args['multi_cores'], para_star)
             p1 = subprocess.run(shlex.split(c1))
             # rename exists file
-            os.rename(map_prefix + 'Aligned.sortedByCoord.out.bam', map_bam)
+            # sort bam files
+            pysam.sort('-o', map_bam, 
+                '-@', str(args['multi_cores']),
+                map_prefix + 'Aligned.sortedByCoord.out.bam')
+            # os.rename(map_prefix + 'Aligned.sortedByCoord.out.bam', map_bam)
             os.rename(map_prefix + 'Unmapped.out.mate1', unmap_fq)
             os.rename(map_prefix + 'Log.final.out', map_log)
             
@@ -311,7 +339,20 @@ class Alignment(object):
         """Run alignments"""
         args = self.args
         fqs = args['fqs']
-        idxes = self.get_align_index()
+        
+        # check indexes
+        if args['index_ext'] is None:
+            idxes = self.get_align_index()
+        else:
+            idxes = args['index_ext']
+            idxes_flag = [is_idx(f, args['aligner']) for f in idxes]
+            if all(idxes_flag) is False:
+                logging.error('%10s | -x option error' % 'failed')
+                logging.error('%10s : %s' % ('Aligner', args['aligner']))
+                logging.error('%10s : %s' % ('index', idxes))
+                sys.exit(1)
+
+        # run alignment
         out_bam_files = []
         for fq in fqs:
             logging.info('mapping: %s ' % fq)
@@ -707,7 +748,7 @@ class Alignment_stat(object):
             return None
         elif len(json_files) == 1:
             # map_genome
-            df = self._json_log_reader(log_files[0])
+            df = self._json_log_reader(json_files[0])
             return df
         else:
             json_files = sorted(json_files, key=len)
@@ -723,12 +764,16 @@ class Alignment_stat(object):
                 group = log_name.split('.')[-3] # map_group
                 group = re.sub('map_', '', group)
                 df = df.assign(mapped=df.unique + df.multiple)
-                df.columns.values[-1] = group # rename column
-                frames.append(df.loc[:, group])
+                # df.columns.values[-1] = group # rename column
+                #df_group = df.loc[:, group]
+                df_group = df.iloc[:, -1]
+                df_group = pd.DataFrame({'g': df_group})
+                df_group.columns = [group]
+                frames.append(df_group)
             # all rows
-            dfx = pd.concat(frames, axis=1)
+            dfx = pd.concat(frames) #, axis=1, sort=True, ignore_index=True)
             dfx.index = list(dfg.index.values)
-           
+
             # all stat
             df = pd.concat([dfx, dfg], axis=1)
             df = df.assign(total=pd.Series(df.sum(axis=1)).values)

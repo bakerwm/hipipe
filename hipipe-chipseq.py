@@ -2,19 +2,27 @@
 # -*- coding: utf-8 -*-
 """
 
-## RNAseq-pipeline
+## ChIPseq-pipeline
 
 + 1. trimming
-
-NSR library: cut 6 nt at both ends
 
 ```
 $ hipipe-trim.py -i in.fq -o path_out
 ```
 
-+ 2. mapping
++ 2. align IP/Input to genome
 
-keep both unique, multiple reads
+Alignment mode:
+0, unique_only
+1. unique_only
+2. randomely assigned multimapper
+4. CSEM allocated multimapper
+ 
+
+
+Using Bowtie2, keep both unique, multiple reads
+
+--very-sensitive-local
 
 ```
 $ hipipe-align.py -i in.clean.fq -o path_out -n smp -g dm3
@@ -22,10 +30,10 @@ $ hipipe-align.py -i in.clean.fq -o path_out -n smp -g dm3
 
 **Fruitfly**
 
-  - a. map to genome, STAR (dm3)  
-  - b. map to transposon consensus  
+  - a. map to genome, Bowtie2 (dm3)  
+  - b. map to transposon consensus
   - c. featureCount, quantification  
-  - d. DESeq2 analysis (from matrix)  
+  - d. DESeq2 analysis (from matrix)
   - e. make plots: scatter plot, MA plot, volcano plot  
   - f. scatter plot: RPM
   - g. summary report:
@@ -276,15 +284,15 @@ def main():
 
     # ## create bigWig files ##
     map_bam_files = ctl_bam_files + tre_bam_files
-    bw_path = prj_path['bigWig']
-    for bam in map_bam_files:
-        bam2bigwig(
-            bam=bam, 
-            genome=args.g, 
-            path_out=bw_path, 
-            strandness=args.s, 
-            binsize=args.bin_size, 
-            overwrite=args.overwrite)
+    # bw_path = prj_path['bigWig']
+    # for bam in map_bam_files:
+    #     bam2bigwig(
+    #         bam=bam, 
+    #         genome=args.g, 
+    #         path_out=bw_path, 
+    #         strandness=args.s, 
+    #         binsize=args.bin_size, 
+    #         overwrite=args.overwrite)
 
 
     ## count ##

@@ -15,6 +15,7 @@ __date__ = "2018-03-21"
 __version__ = "0.1"
 
 import os
+import sys
 import pathlib
 import argparse
 from alignment import Alignment, Alignment_log, Alignment_stat
@@ -32,7 +33,7 @@ def get_args():
         help='CLIP reads in FASTQ format, (not *.gz), 1-4 files.')
     parser.add_argument('-o', default=None, 
         metavar='OUTPUT',  help='The directory to save results, default, \
-        the same as input fastq files.')
+        current working directory.')
     parser.add_argument('-n', required=True, metavar='NAME',
         help='Name of the experiment')
     parser.add_argument('-g', required=True, default='hg19', 
@@ -41,12 +42,19 @@ def get_args():
     parser.add_argument('-k', default=None, 
         metavar='Spike-in', choices=[None, 'dm3', 'hg19', 'hg38', 'mm10'],
         help='Spike-in genome : dm3, hg19, hg38, mm10, default: None')
+    parser.add_argument('-x', nargs='+', metavar='align_index',
+        help='Provide alignment index(es) for alignment, support multiple\
+        indexes. if specified, ignore -g, -k')
     parser.add_argument('--threads', default=8, 
         metavar='THREADS', type=int, 
         help='Number of threads to launch, default: 8.')
     parser.add_argument('--unique-only', action='store_true',
         dest='unique_only',
         help='if specified, keep unique mapped reads only')
+    parser.add_argument('--n-map', dest='n_map', type=int, default=0,
+        help='Report up to N alignments per read. use -k for bowtie and \
+        bowtie2 (default 1), --outFilterMultimapNmax for STAR \
+        (default 20).')
     parser.add_argument('--aligner', default='bowtie', 
         choices=['bowtie', 'bowtie2', 'star'],
         help='Choose which aligner to use. default: bowtie')
@@ -65,9 +73,16 @@ def get_args():
 def main():
     args = get_args()
     fqs = [f.name for f in args.i]
-    tmp = Alignment(fqs, args.o, smp_name=args.n, genome=args.g,
-                    spikein=args.k, multi_cores=args.threads, 
+    if args.o is None:
+        args.o = str(pathlib.Path.cwd())
+    tmp = Alignment(fqs, args.o, 
+                    smp_name=args.n, 
+                    genome=args.g,
+                    spikein=args.k, 
+                    index_ext=args.x,
+                    multi_cores=args.threads, 
                     unique_only=args.unique_only,
+                    n_map=args.n_map,
                     aligner=args.aligner,
                     align_to_rRNA=args.align_to_rRNA,
                     path_data=args.path_data,
