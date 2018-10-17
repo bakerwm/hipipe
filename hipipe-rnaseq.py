@@ -276,15 +276,15 @@ def main():
 
     # ## create bigWig files ##
     map_bam_files = ctl_bam_files + tre_bam_files
-    # bw_path = prj_path['bigWig']
-    # for bam in map_bam_files:
-    #     bam2bigwig(
-    #         bam=bam, 
-    #         genome=args.g, 
-    #         path_out=bw_path, 
-    #         strandness=args.s, 
-    #         binsize=args.bin_size, 
-    #         overwrite=args.overwrite)
+    bw_path = prj_path['bigWig']
+    for bam in map_bam_files:
+        bam2bigwig(
+            bam=bam, 
+            genome=args.g, 
+            path_out=bw_path, 
+            strandness=args.s, 
+            binsize=args.bin_size, 
+            overwrite=args.overwrite)
 
 
     ## count ##
