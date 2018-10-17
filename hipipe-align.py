@@ -51,6 +51,10 @@ def get_args():
     parser.add_argument('--unique-only', action='store_true',
         dest='unique_only',
         help='if specified, keep unique mapped reads only')
+    parser.add_argument('--n-map', dest='n_map', type=int, default=0,
+        help='Report up to N alignments per read. use -k for bowtie and \
+        bowtie2 (default 1), --outFilterMultimapNmax for STAR \
+        (default 20).')
     parser.add_argument('--aligner', default='bowtie', 
         choices=['bowtie', 'bowtie2', 'star'],
         help='Choose which aligner to use. default: bowtie')
@@ -78,6 +82,7 @@ def main():
                     index_ext=args.x,
                     multi_cores=args.threads, 
                     unique_only=args.unique_only,
+                    n_map=args.n_map,
                     aligner=args.aligner,
                     align_to_rRNA=args.align_to_rRNA,
                     path_data=args.path_data,
