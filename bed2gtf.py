@@ -11,7 +11,7 @@ import pysam
 import pybedtools
 
 
-f = '/home/data/genome/dm3/dm3_transposon/dm3.transposon.fa.fai'
+# f = '/home/data/genome/dm3/dm3_transposon/dm3.transposon.fa.fai'
 
 
 def bed2gtf(x):
@@ -28,14 +28,20 @@ def bed2gtf(x):
 
 
 
+# with open(f, 'rt') as ff:
+#     for line in ff:
+#         name, length = line.strip().split('\t')[0:2]
+#         fb, label = name.split('_')
+#         tabs = [name, '0', length, label, '100', '+']
+#         gtf = bed2gtf(tabs)
+#         print('\t'.join(gtf))
+
+f = sys.argv[1]
+
 with open(f, 'rt') as ff:
     for line in ff:
-        name, length = line.strip().split('\t')[0:2]
-        fb, label = name.split('_')
-        tabs = [name, '0', length, label, '100', '+']
-        gtf = bed2gtf(tabs)
+        p = line.strip().split('\t')[0:6]
+        gtf = bed2gtf(p)
         print('\t'.join(gtf))
-
-
 
 
