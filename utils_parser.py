@@ -111,7 +111,6 @@ class Json_file(object):
                 return json.load(ff)
 
 
-
     def json_writer(self, to=None):
         """Write dict to file in json format"""
         fn = self.fn
