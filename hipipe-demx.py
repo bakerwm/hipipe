@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
 
-
-
-
 __author__ = 'Ming Wang'
 __email__ = 'wangm08@hotmail.com'
 __date__ = '2018-05-21'
@@ -63,6 +60,7 @@ def get_args():
         help='use bioawk to demulplex only read1.')
     args = parser.parse_args()
     return args
+
 
 def is_gz(filepath):
     with open(filepath, 'rb') as test_f:
