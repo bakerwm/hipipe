@@ -184,10 +184,10 @@ class Alignment(object):
         para_fq = '-f' if seq_type(fq) == 'fasta' else '-q'
         n_map = args['n_map']
         if args['unique_only'] is True:
-            para_bowtie2 = '-m 1'
+            para_bowtie = '-m 1'
         else:
             n_map = 1 if n_map == 0 else n_map
-            para_bowtie2 = '-k %s' % n_map
+            para_bowtie = '-k %s' % n_map
 
         if os.path.exists(map_bam) and args['overwrite'] is False:
             logging.info('file exists, alignment skipped: %s' % map_bam)
@@ -769,9 +769,10 @@ class Alignment_stat(object):
                 df_group = df.iloc[:, -1]
                 df_group = pd.DataFrame({'g': df_group})
                 df_group.columns = [group]
+                df_group.index = [os.path.basename(path)]
                 frames.append(df_group)
             # all rows
-            dfx = pd.concat(frames) #, axis=1, sort=True, ignore_index=True)
+            dfx = pd.concat(frames, sort=False, axis=1) #, axis=1, sort=True, ignore_index=True)
             dfx.index = list(dfg.index.values)
 
             # all stat
