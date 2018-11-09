@@ -3,6 +3,75 @@
 A group of scripts for HiSeq data, including demx, trimming, alignment etc.
 
 
+## design
+
+### demx
+
+1. compare two strings, mismatches
+
+2. p7 and inline barcode, separate, or at the same time
+
+3. PE or SE
+
+
+### trim
+
+1. `cutadapt` trim adapters
+
+2. cut extra base at either ends
+
+3. remove untrim reads
+
+4. remove dup reads
+
+5. support SE, PE reads (trimmomatic)
+
+
+### align
+
+1. determine aligner: bowtie, bowtie2, star, ...
+
+2. parameters: unique-only, mismatch, n-mapped, 
+
+3. index: spike-in, mt-trRNA, genome, TE, extra sequence ...
+
+4. mappig stat
+
+
+### rnaseq
+
+
+### chipseq
+
+
+### smRNAseq
+
+
+### goldclip
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## RNAseq-pipeline
 
 + 1. trimming
