@@ -21,6 +21,7 @@ import pandas as pd
 import pysam
 import pybedtools
 import binascii
+from requests import get  # to make GET request
 from goldclip.bin.bed_fixer import *
 from goldclip.configure import goldclip_home
 from goldclip.helper import *
@@ -403,10 +404,21 @@ def bam_merge(bam_ins, bam_out):
 
 
 
-## virtual env
-class Genome_info():
-    """
-    including the information of genome
+
+class Genome_info(object):
+    """List related information of specific genome
+    1. get_fa(), genome fasta
+    2. get_fasize(), genome fasta size
+    3. bowtie_index(), bowtie index, optional, rRNA=True
+    4. bowtie2_index(), bowtie2 index, optional, rRNA=True
+    5. star_index(), STAR index, optional, rRNA=True
+    6. gene_bed(), 
+    7. gene_rmsk(), 
+    8. gene_gtf(), optional, version='ucsc|ensembl|ncbi'
+    9. te_gtf(), optional, version='ucsc'
+    10. te_consensus(), optional, fruitfly()
+    ...
+
     index, annotation, ...
     """
 
@@ -414,7 +426,7 @@ class Genome_info():
         assert isinstance(genome, str)
         self.kwargs = kwargs
         self.kwargs['genome'] = genome
-        if not 'path_data' in kwargs:
+        if not 'genome_path' in kwargs:
             self.kwargs['path_data'] = os.path.join(pathlib.Path.home(), 
                                                     'data', 'genome')
         
@@ -688,5 +700,246 @@ def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False):
 
 
 
+################################################################################
+## split line
+################################################################################
 
+def download(url, file_name):
+    # open in binary mode
+    with open(file_name, "wb") as file:
+        # get request
+        response = get(url)
+        # write to file
+        file.write(response.content)
+
+
+def index_validator(index, aligner='bowtie'):
+    """Check the index
+    search the aligner in $PATH
+    1. bowtie: bowtie-inspect -s <index>
+    2. bowtie2: bowtie2-inspect -s <index>
+    3. STAR: <index>/Genome, file exists
+    4. ...
+    """
+    # check command
+    aligner_stat = which(aligner)
+    if not aligner_stat:
+        raise ValueError('aligner not detected in $PATH: %s' % aligner)
+    else:
+        aligner = aligner_stat 
+
+    flag = False
+    if aligner.lower().startswith('bowtie'):
+        # bowtie, bowtie2
+        c = [aligner + '-inspect', '-s', index]
+        p = subprocess.run(c, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if len(p.stdout) > 0:
+            flag = True
+    elif aligner.lower() == 'star':
+        p = os.path.join(index, 'Genome')
+        if os.path.exists(p):
+            flag = True
+    else:
+        raise ValueError('unknown aligner: %s' % aligner)
+
+    return flag
+
+
+def index_finder(genome, aligner='bowtie', rRNA=False, genome_path=None):
+    """Find aligner index
+    if rRNA is True, return the rRNA index only
+    if return None, the index not found, or file not exists
+    
+    structure of genome_path:
+    default: {HOME}/data/genome/{genome_version}/{aligner}/
+
+    /genome_path/
+        |- genome
+        |- rRNA
+        |- MT_trRNA
+        |- 
+
+    """
+    # determine the path of genome data
+    if genome_path is None:
+        genome_path = os.path.join(pathlib.Path.home(), 'data', 'genome')
+
+    # rRNA
+    if rRNA:
+        # choose the first one
+        rRNA_list = ['MT_trRNA', 'rRNA']
+        idx_rRNA = [os.path.join(genome_path, genome, aligner + '_index', i) for i in rRNA_list]
+        idx_rRNA = [i for i in idx_rRNA if index_validator(i, aligner)]
+        if len(idx_rRNA) >= 1:
+            idx = idx_rRNA[0]
+        else:
+            idx = None
+    # genome
+    else:
+        idx = os.path.join(genome_path, genome, aligner + '_index', 'genome')
+
+    # validate
+    if not index_validator(idx):
+        idx = None
+    return idx
+
+
+
+
+class Genome(object):
+    """List related information of specific genome
+    1. get_fa(), genome fasta
+    2. get_fasize(), genome fasta size
+    3. bowtie_index(), bowtie index, optional, rRNA=True
+    4. bowtie2_index(), bowtie2 index, optional, rRNA=True
+    5. star_index(), STAR index, optional, rRNA=True
+    6. gene_bed(), 
+    7. gene_rmsk(), 
+    8. gene_gtf(), optional, version='ucsc|ensembl|ncbi'
+    9. te_gtf(), optional, version='ucsc'
+    10. te_consensus(), optional, fruitfly()
+    ...
+
+    directory structure of genome should be like this:
+    /path-to-data/{genome}/
+        |- bigZips  # genome fasta, fasize, chromosome 
+        |- annotation_and_repeats  # gtf, bed, rRNA, tRNA, annotation
+        |- bowtie_index
+        |- bowtie2_index
+        |- STAR_index
+        |- hisat2_index
+        |- phylop100
+        |- ...
+
+    default: $HOME/data/genome/{genome}
+
+    """
+
+    def __init__(self, genome, genome_path=None, **kwargs):
+        assert isinstance(genome, str)
+        self.genome = genome
+        if not genome_path:
+            genome_path = os.path.join(pathlib.Path.home(), 'data', 'genome')
+        self.data_path = data_path
+
+
+    def get_fa(self):
+        """Get the fasta file of specific genome
+        {genome}/bigZips/{genome}.fa
+        also check ".gz" file
+        """
+        fa = os.path.join(self.genome_path, self.genome, 'bigZips', self.genome + '.fa')
+        fa_gz = fa + '.gz'
+        if not os.path.exists(fa):
+            if os.path.exists(fa_gz):
+                logging.error('require to unzip the fasta file: %s' % fa_gz)
+            else:
+                logging.error('fasta file not detected: %s' % fa)
+            return None
+        else:
+            return fa
+
+
+    def get_fasize(self):
+        """Get the fasta size file, chromosome size
+        optional, fetch chrom size from ucsc
+        http://hgdownload.cse.ucsc.edu/goldenPath/<db>/bigZips/<db>.chrom.sizes
+
+        or using UCSC tool: fetchChromSizes
+        fetchChromSizes hg39 > hg38.chrom.sizes
+        """
+        fa_size = os.path.join(self.genome_path, self.genome, 'bigZips', 
+            self.genome + '.chrom.sizes')
+        if not os.path.exists(fa_size):
+            logging.info('Downloading chrom.sizes from UCSC')
+            url = 'http://hgdownload.cse.ucsc.edu/goldenPath/%s/bigZips/%s.chrom.sizes' % self.genome
+            download(url, fa_size)
+        return fa_size
+
+
+    def bowtie_index(self, rRNA=False):
+        """Return the bowtie index for the genome
+        optional, return rRNA index
+        """
+        index = index_finder(self.genome, aligner='bowtie', rRNA=rRNA,
+            genome_path=self.genome_path)
+        return index
+
+
+    def bowtie2_index(self, rRNA=False):
+        """Return the bowtie2 index for the genome
+        optional, return rRNA index
+        """
+        index = index_finder(self.genome, aligner='bowtie2', rRNA=rRNA,
+            genome_path=self.genome_path)
+        return index
+
+
+    def star_index(self, rRNA=False):
+        """Return the STAR index for the genome
+        optional, return rRNA index
+        """
+        index = index_finder(self.genome, aligner='STAR', rRNA=rRNA,
+            genome_path=self.genome_path)
+        return index
+
+
+    def hisat2_index(self, rRNA=False):
+        """Return the Hisat2 index for the genome
+        optional, return rRNA index
+        """
+        index = index_finder(self.genome, aligner='hisat2', rRNA=rRNA,
+            genome_path=self.genome_path)
+        return index
+
+
+    def phylop100(self):
+        """Return the phylop100 bigWig file of hg19, only
+        for conservation analysis
+        """
+        p = os.path.join(self.genome_path, self.genome, 'phyloP100way',
+            self.genome + '.100way.phyloP100way.bw')
+        if not os.path.exists(p):
+            p = None
+        return p
+
+
+    def gene_bed(self, version='ucsc', rmsk=False):
+        """Return the gene annotation in BED format
+        support UCSC, ensembl version
+        """
+        if rmsk:
+            suffix = '.rmsk.bed'
+        else:
+            suffix = '.refseq.bed'
+        g = os.path.join(self.genome_path, self.genome, 'annotation_and_repeats',
+            self.genome + suffix)
+        if not os.path.exists(g):
+            g = None
+        return g
+
+
+    def gene_gtf(self, version='ucsc'):
+        """Return the gene annotation in GTF format
+        support UCSC, ensembl version
+        """
+        if version.lower() == 'ucsc':
+            suffix = '.refseq.gtf'
+        elif version.lower() == 'ensembl':
+            suffix = '.ensembl.gtf'
+        else:
+            suffix = '.gtf'
+        g = os.path.join(self.genome_path, self.genome, 'annotation_and_repeats',
+            self.genome + suffix)
+        if not os.path.exists(g):
+                g = None
+            return g
+
+
+    def te(self):
+        """Return TE annotation of the genome
+        or return TE consensus sequence for the genome (dm3)
+        """
+        pass
+        # additional Class
 
