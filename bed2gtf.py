@@ -10,9 +10,7 @@ import sys
 import pysam
 import pybedtools
 
-
 # f = '/home/data/genome/dm3/dm3_transposon/dm3.transposon.fa.fai'
-
 
 def bed2gtf(x):
     """Convert BED to GTF
