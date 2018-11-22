@@ -56,7 +56,7 @@ def get_args():
         bowtie2 (default 1), --outFilterMultimapNmax for STAR \
         (default 20).')
     parser.add_argument('--aligner', default='bowtie', 
-        choices=['bowtie', 'bowtie2', 'star'],
+        choices=['bowtie', 'bowtie2', 'STAR'],
         help='Choose which aligner to use. default: bowtie')
     parser.add_argument('--align-to-rRNA', dest='align_to_rRNA',
         action='store_true',
@@ -75,20 +75,31 @@ def main():
     fqs = [f.name for f in args.i]
     if args.o is None:
         args.o = str(pathlib.Path.cwd())
-    tmp = Alignment(fqs, args.o, 
-                    smp_name=args.n, 
-                    genome=args.g,
-                    spikein=args.k, 
-                    index_ext=args.x,
-                    multi_cores=args.threads, 
-                    unique_only=args.unique_only,
-                    n_map=args.n_map,
-                    aligner=args.aligner,
-                    align_to_rRNA=args.align_to_rRNA,
-                    path_data=args.path_data,
-                    overwrite=args.overwrite).run()
-
-
+    # tmp = Alignment(fqs, args.o, 
+    #                 smp_name=args.n, 
+    #                 genome=args.g,
+    #                 spikein=args.k, 
+    #                 index_ext=args.x,
+    #                 multi_cores=args.threads, 
+    #                 unique_only=args.unique_only,
+    #                 n_map=args.n_map,
+    #                 aligner=args.aligner,
+    #                 align_to_rRNA=args.align_to_rRNA,
+    #                 path_data=args.path_data,
+    #                 overwrite=args.overwrite).run()
+    tmp = Alignment(
+        fqs, args.o, 
+        smp_name=args.n,
+        genome=args.g,
+        spikein=args.k, 
+        index_ext=args.x,
+        threads=args.threads, 
+        unique_only=args.unique_only,
+        n_map=args.n_map,
+        aligner=args.aligner,
+        align_to_rRNA=args.align_to_rRNA,
+        path_data=args.path_data,
+        overwrite=args.overwrite).run()
 
 if __name__ == '__main__':
     main()
