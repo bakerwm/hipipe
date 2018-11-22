@@ -162,10 +162,13 @@ class Alignment(object):
             reference, align_path)
 
         # determine parameters
+        n_map = args['n_map']
+        if n_map < 1:
+            n_map = 1 # default
         if unique_map:
             para_unique = '-m 1'
         else:
-            para_unique = '-v 2 -k %s' % args['n_map'] # default: 1
+            para_unique = '-v 2 -k %s' % n_map # default: 1
 
         if seq_type(fq) == 'fasta':
             para_fq = '-f'
@@ -295,12 +298,10 @@ class Alignment(object):
             
             # filter unique mapped reads
             if unique_map: # only unique mapped reads, -q 10
-                print('AAAA')
                 pysam.view('-bhS', '-q', '10', '-@', str(args['threads']),
                     '-o', map_bam, map_prefix + 'Aligned.sortedByCoord.out.bam',
                     catch_stdout=False)
             else:
-                print('BBBB')
                 os.rename(map_prefix + 'Aligned.sortedByCoord.out.bam', map_bam)
             os.rename(map_prefix + 'Unmapped.out.mate1', unmap)
             os.rename(map_prefix + 'Log.final.out', map_log)
@@ -336,34 +337,37 @@ class Alignment(object):
         bam_files = []
         fq_input = fq
 
-        # 1. genome_rRNA
+        # 1. genome_rRNA (rRNA: both unique, multiple)
         idx1 = index_dict['genome_rRNA']
         reference = self.genome + '_rRNA'
         bam_idx1, unmap_idx1 = aligner_exe(fq=fq_input, index=idx1, 
-            reference=reference, unique_map=args['unique_only'], 
+            reference=reference, unique_map=False, 
             align_path=align_path)
         fq_input = unmap_idx1
 
         # 2. genome
         idx2 = index_dict['genome']
         reference = self.genome
-        bam_idx2, unmap_idx2 = aligner_exe(fq_input, idx1, reference, 
-            args['unique_only'], align_path)
+        bam_idx2, unmap_idx2 = aligner_exe(fq=fq_input, index=idx2, 
+            reference=reference, unique_map=args['unique_only'], 
+            align_path=align_path)
         fq_input = unmap_idx2
 
         if args['spikein']: # add spikein
-            # 3. sp_rRNA (optional)
+            # 3. sp_rRNA  (rRNA: both unique, multiple)
             idx3 = index_dict['sp_rRNA']
             reference = args['spikein'] + '_rRNA'
-            bam_idx3, unmap_idx3 = aligner_exe(fq_input, idx1, reference, 
-                args['unique_only'], align_path)
+            bam_idx3, unmap_idx3 = aligner_exe(fq=fq_input, index=idx3, 
+                reference=reference, unique_map=False,
+                align_path=align_path)
             fq_input = unmap_idx3
 
             # 4. sp (optional)
-            idx3 = index_dict['sp']
+            idx4 = index_dict['sp']
             reference = args['spikein']
-            bam_idx4, unmap_idx4 = aligner_exe(fq_input, idx1, reference, 
-                args['unique_only'], align_path)
+            bam_idx4, unmap_idx4 = aligner_exe(fq=fq_input, index=idx4, 
+                reference=reference, unique_map=args['unique_only'],
+                align_path=align_path)
             fq_input = unmap_idx4
 
             bam_files = [bam_idx1, bam_idx2, bam_idx3, bam_idx4]
@@ -402,8 +406,8 @@ class Alignment(object):
         # merge bam files
         merged_path = os.path.join(args['path_out'], args['smp_name'])
         merged_files = []
-        assert is_path(merged_path)
         if len(bam_out) > 1: # for multiple bam files
+            assert is_path(merged_path)
             for i in range(len(bam_out[0])):
                 rep_bam_files = [b[i] for b in bam_out]
                 merged_suffix = str_common(rep_bam_files, suffix=True)
@@ -436,6 +440,428 @@ class Alignment(object):
             genome_bam_files.append(bam_to)
 
         return genome_bam_files
+
+
+class Alignment_log(object):
+    """Wrapper log file of aligner, bowtie, bowtie2, STAR
+    report: total reads, unique mapped reads, multiple mapped reads
+
+    Bowtie2:
+
+    10000 reads; of these:
+      10000 (100.00%) were unpaired; of these:
+        166 (1.66%) aligned 0 times
+        2815 (28.15%) aligned exactly 1 time
+        7019 (70.19%) aligned >1 times
+    98.34% overall alignment rate
+
+
+    Bowtie:
+
+    # reads processed: 10000
+    # reads with at least one reported alignment: 3332 (33.32%)
+    # reads that failed to align: 457 (4.57%)
+    # reads with alignments suppressed due to -m: 6211 (62.11%)
+
+    or:
+
+    # reads processed: 10000
+    # reads with at least one reported alignment: 9543 (95.43%)
+    # reads that failed to align: 457 (4.57%)
+
+
+    STAR:
+    *final.Log.out
+
+                                 Started job on |       Sep 12 11:08:57
+                             Started mapping on |       Sep 12 11:11:27
+                                    Finished on |       Sep 12 11:11:29
+       Mapping speed, Million of reads per hour |       18.00
+
+                          Number of input reads |       10000
+                      Average input read length |       73
+                                    UNIQUE READS:
+                   Uniquely mapped reads number |       47
+                        Uniquely mapped reads % |       0.47%
+                          Average mapped length |       51.66
+                       Number of splices: Total |       5
+            Number of splices: Annotated (sjdb) |       0
+                       Number of splices: GT/AG |       3
+                       Number of splices: GC/AG |       0
+                       Number of splices: AT/AC |       0
+               Number of splices: Non-canonical |       2
+                      Mismatch rate per base, % |       2.14%
+                         Deletion rate per base |       0.04%
+                        Deletion average length |       1.00
+                        Insertion rate per base |       0.00%
+                       Insertion average length |       0.00
+                             MULTI-MAPPING READS:
+        Number of reads mapped to multiple loci |       83
+             % of reads mapped to multiple loci |       0.83%
+        Number of reads mapped to too many loci |       19
+             % of reads mapped to too many loci |       0.19%
+                                  UNMAPPED READS:
+       % of reads unmapped: too many mismatches |       0.02%
+                 % of reads unmapped: too short |       98.31%
+                     % of reads unmapped: other |       0.18%
+                                  CHIMERIC READS:
+                       Number of chimeric reads |       0
+                            % of chimeric reads |       0.00%
+    """
+
+    def __init__(self, log, unique_only=False):
+        self.log = log
+        self.unique_only = unique_only
+        # stat
+        if isinstance(log, Alignment_log):
+            self.stat = log.stat
+        elif isinstance(log, dict):
+            self.stat = log
+        elif os.path.isfile(log):
+            self.stat = self._log_parser()
+        else:
+            raise ValueError('not supported file: %s' % log)
+
+
+    def guess_aligner(self):
+        """Guess the aligner of the log file:
+        bowtie, bowtie2, STAR, ...
+        """
+        # read through log file
+        log_lines = []
+        with open(self.log, 'rt') as ff:
+            for r in ff:
+                if r.startswith('Warning'):
+                    continue
+                log_lines.append(r.strip())
+
+        # parsing log file
+        line = log_lines[0] # the first line
+        if line.startswith('#'):
+            log_parser = self._bowtie_parser
+        elif 'reads; of these' in line:
+            log_parser = self._bowtie2_parser
+        elif '|' in line:
+            log_parser = self._star_parser
+        else:
+            raise ValueError('unknown file format: %s' % self.log)
+            pass
+        return log_parser
+
+
+    def _is_non_empty(self):
+        """Check if log file is empty"""
+        if os.path.getsize(self.log) > 0:
+            return True
+        else:
+            return False
+
+
+    def _bowtie_parser(self):
+        """Wrapper bowtie log
+        unique, multiple, unmap, map, total
+        """
+        dd = {}
+        with open(self.log, 'rt') as ff:
+            for line in ff:
+                if not ':' in line or line.startswith('Warning'):
+                    continue
+                num = line.strip().split(':')[1]
+                value = num.strip().split(' ')[0]
+                value = int(value)
+                if 'reads processed' in line:
+                    dd['total'] = value
+                elif 'at least one reported alignment' in line:
+                    dd['map'] = value
+                elif 'failed to align' in line:
+                    dd['unmap'] = value
+                elif 'alignments suppressed due to -m' in line:
+                    dd['multiple'] = value
+                else:
+                    pass
+        # unique_only
+        dd['unique'] = dd['map']
+        dd['multiple'] = dd.get('multiple', 0) # default 0
+        if self.unique_only:
+            dd['map'] = dd['unique']
+        else:
+            dd['map'] = dd['unique'] + dd['multiple']
+        dd['unmap'] = dd['total'] - dd['unique'] - dd['multiple']
+        return dd
+
+
+    def _bowtie2_parser(self):
+        """Wrapper bowtie2 log"""
+        dd = {}
+        with open(self.log, 'rt') as ff:
+            for line in ff:
+                value = line.strip().split(' ')[0]
+                if '%' in value:
+                    continue
+                value = int(value)
+                if 'reads; of these' in line:
+                    dd['total'] = value
+                elif 'aligned 0 times' in line:
+                    dd['unmap'] = value
+                elif 'aligned exactly 1 time' in line:
+                    dd['unique'] = value
+                elif 'aligned >1 times' in line:
+                    dd['multiple'] = value
+                else:
+                    pass
+        if self.unique_only:
+            dd['map'] = dd['unique']
+        else:
+            dd['map'] = dd['unique'] + dd['multiple']
+        dd['unmap'] = dd['total'] - dd['unique'] - dd['multiple']
+        return dd
+
+
+    def _star_parser(self):
+        """Wrapper STAR *final.log"""
+        dd = {}
+        with open(self.log, 'rt') as ff:
+            for line in ff:
+                value = line.strip().split('|')
+                if not len(value) == 2:
+                    continue
+                value = value[1].strip()
+                if 'Number of input reads' in line:
+                    dd['total'] = int(value)
+                elif 'Uniquely mapped reads number' in line:
+                    dd['unique'] = int(value)
+                elif 'Number of reads mapped to multiple loci' in line:
+                    dd['multiple'] = int(value)
+                else:
+                    pass
+        if self.unique_only is True:
+            dd['map'] = dd['unique']
+        else:
+            dd['map'] = dd['unique'] + dd['multiple']
+        dd['unmap'] = dd['total'] - dd['unique'] - dd['multiple']
+        return dd
+
+
+    def _log_parser(self):
+        """Read log file as dict
+        delimiter:
+        bowtie:  ":"
+        bowtie2:  ":"
+        STAR:  "|"
+
+        extra trimming
+        1. trim "(10.00%)" 
+        2. trim "blank" at both ends
+        """
+        log = self.log
+        log_parser = self.guess_aligner()
+        dd = log_parser()
+        return dd
+
+
+    def _tmp(self):
+        """Create a temp file"""
+        tmpfn = tempfile.NamedTemporaryFile(prefix='tmp',
+                                            suffix='.json',
+                                            delete=False)
+        return tmpfn.name
+
+
+    def saveas(self, _out=None):
+        """Make a copy of statistics of mapping results"""
+        log = self.log
+        if _out is None:
+            # _out = self._tmp()
+            _out = os.path.splitext(log)[0] + '.json'
+
+        dd = self.stat
+
+        with open(_out, 'wt') as fo:
+            json.dump(dd, fo, indent=4, sort_keys=False)
+
+        return _out
+
+
+class Alignment_stat(object):
+    """Parse mapping reads in directory
+    1. for each rep bam, parse json files, 
+    2. merge replicates
+    """
+    def __init__(self, path):
+        self.path = path
+
+        if isinstance(path, Alignment_stat):
+            self.stat = path.stat
+        elif isinstance(path, pd.DataFrame):
+            self.stat = path
+        elif os.path.isdir(path):
+            json_files = self.json_files()
+            bam_files = self.bam_files()
+            if json_files:
+                self.stat = self.rep_stat()
+            elif bam_files:
+                self.stat = self.merge_stat()
+            else:
+                raise ValueError('BAM or json files not found: %s' % path)
+        else:
+            raise ValueError('unknown format')
+
+
+    def _is_non_empty(self, fn):
+        """Check if log file is empty"""
+        if os.path.getsize(fn) > 0:
+            return True
+        else:
+            return False
+
+
+    def findfiles(self, which, where='.'):
+        """Returns list of filenames from `where` path matched by 'which'
+        shell pattern. Matching is case-insensitive.
+        # findfiles('*.ogg')
+        """    
+        # TODO: recursive param with walk() filtering
+        rule = re.compile(fnmatch.translate(which), re.IGNORECASE)
+        hits = [os.path.join(where, name) for name in os.listdir(where) if rule.match(name)]
+        return hits
+
+
+    def json_files(self):
+        """Return all json files in path"""
+        j = self.findfiles('*.json', self.path)
+        j = [i for i in j if self._is_non_empty(i)] # exclude empty json
+        if len(j) == 0:
+            j = None
+        return j
+
+
+    def bam_files(self):
+        """Return all BAM files in path
+        skip symlink
+        # directory of merged fastq, count bam file
+        # to-do: summary replicates (except unmap)
+        """
+        bam_files = self.findfiles('*.bam', self.path)
+        bam_files = [b for b in bam_files if self._is_non_empty(b) and not os.path.islink(b)]
+        if len(bam_files) == 0:
+            bam_files = None
+        return bam_files
+
+
+    def _json_log_reader(self, fn, to_dataframe=True):
+        """Parse json file, save as DataFrame"""
+        if fn is None:
+            return None
+        fn_name = os.path.basename(fn)
+        group, aligner = fn.split('.')[-3:-1] # 
+        group = re.sub('^map_', '', group)
+        dd = Json_file(fn).stat # dict of count
+        rpt = dd
+        if to_dataframe:
+            # total, unique, multiple, unmap
+            df = pd.DataFrame(data=[list(dd.values())], columns=list(dd.keys()))
+            df.pop('map') # drop "map" column
+            df.index = [fn_name]
+            rpt = df
+        return rpt
+
+
+    def rep_stat(self):
+        """Extract alignment log files in directory
+        """
+        path = self.path.rstrip('/')
+        json_files = self.json_files()
+        json_files = sorted(json_files, key=len)
+        prefix = os.path.basename(self.path)
+        # genome_rRNA, genome, sp_rRNA, sp, unmap, map, total
+        if len(json_files) == 2 or len(json_files) == 4:
+            pass
+        else:
+            raise ValueError('number of json files should be; 2|4, [%d]' % len(json_files))
+
+        # genome
+        # map rRNA, genome, spikein_rRNA, spikein
+        json_genome_rRNA, json_genome = json_files[:2]
+        json_sp_rRNA = json_sp = None
+        if len(json_files) == 4:
+            json_sp_rRNA, json_sp = json_files[2:]
+        df1 = self._json_log_reader(json_genome_rRNA, False)
+        df2 = self._json_log_reader(json_genome, False)
+        df3 = self._json_log_reader(json_sp_rRNA, False)
+        df4 = self._json_log_reader(json_sp, False)
+
+        # genome
+        n_total = df1['total']
+        g_rRNA = df1['unique'] + df1['multiple']
+        g_unique = df2['unique']
+        g_multi = df2['multiple']
+        n_unmap = df2['unmap']
+
+        # spikein rRNA
+        if isinstance(df3, dict):
+            sp_rRNA = df3['unique'] + df3['multiple']
+        else:
+            sp_rRNA = 0
+
+        # spikein
+        if isinstance(df4, dict):
+            sp_unique = df4['unique']
+            sp_multi = df4['multiple']
+            n_unmap = df4['unmap']
+        else:
+            sp_unique = sp_multi = 0
+
+        # output
+        data = {
+            'genome_rRNA': g_rRNA,
+            'genome_unique': g_unique,
+            'genome_multiple': g_multi,
+            'spikein_rRNA': sp_rRNA,
+            'spikein_unique': sp_unique,
+            'spikein_multi': sp_multi,
+            'unmap': n_unmap,
+            'total': n_total}
+        df = pd.DataFrame(data, index=[prefix])
+
+        # return
+        return df
+
+
+    def merge_stat(self):
+        """Stat reads for merged sample
+        combine all reads in each replicates
+        no json files detedted in merged directory
+        search *.csv files in up-level directory
+        """
+        merge_path_name = os.path.basename(self.path.rstrip('/'))
+        parent_path = os.path.dirname(self.path.rstrip('/')) # 
+        rep_path = [i for i in os.listdir(parent_path) if not i == merge_path_name]
+        rep_csv_files = [os.path.join(parent_path, i + '.mapping_stat.csv') for i in rep_path]
+        rep_csv_files = [f for f in rep_csv_files if os.path.isfile(f)]
+
+        if len(rep_csv_files) > 0:
+            frames = [pd.read_csv(i, '\t', index_col=0) for i in rep_csv_files]
+            df = pd.concat(frames, axis=0)
+            # merge
+            df_merge = pd.DataFrame(data=[df.sum(axis=0)], columns=list(df.columns.values),
+                index=[merge_path_name])
+            return df_merge
+        else:
+            logging.error('%10s | not contain mapping files: %s' % ('failed', path))
+            return None
+
+
+    def saveas(self, _out=None):
+        """Make a copy of statistics of mapping results"""
+        path = self.path
+        if _out is None:
+            prefix = os.path.basename(path)
+            _out = os.path.join(os.path.dirname(path),
+                                prefix + '.mapping_stat.csv')
+        df = self.stat
+        df.to_csv(_out, sep='\t', header=True, index=True)
+        
+        return _out
 
 
 
@@ -824,430 +1250,5 @@ class Alignment(object):
 #                 os.symlink(os.path.basename(bed_from), bed_to)
 #             genome_bed_files.append(bed_to)
 #         return genome_bam_files
-
-
-
-class Alignment_log(object):
-    """Wrapper log file of aligner, bowtie, bowtie2, STAR
-    report: total reads, unique mapped reads, multiple mapped reads
-
-    Bowtie2:
-
-    10000 reads; of these:
-      10000 (100.00%) were unpaired; of these:
-        166 (1.66%) aligned 0 times
-        2815 (28.15%) aligned exactly 1 time
-        7019 (70.19%) aligned >1 times
-    98.34% overall alignment rate
-
-
-    Bowtie:
-
-    # reads processed: 10000
-    # reads with at least one reported alignment: 3332 (33.32%)
-    # reads that failed to align: 457 (4.57%)
-    # reads with alignments suppressed due to -m: 6211 (62.11%)
-
-    or:
-
-    # reads processed: 10000
-    # reads with at least one reported alignment: 9543 (95.43%)
-    # reads that failed to align: 457 (4.57%)
-
-
-    STAR:
-    *final.Log.out
-
-                                 Started job on |       Sep 12 11:08:57
-                             Started mapping on |       Sep 12 11:11:27
-                                    Finished on |       Sep 12 11:11:29
-       Mapping speed, Million of reads per hour |       18.00
-
-                          Number of input reads |       10000
-                      Average input read length |       73
-                                    UNIQUE READS:
-                   Uniquely mapped reads number |       47
-                        Uniquely mapped reads % |       0.47%
-                          Average mapped length |       51.66
-                       Number of splices: Total |       5
-            Number of splices: Annotated (sjdb) |       0
-                       Number of splices: GT/AG |       3
-                       Number of splices: GC/AG |       0
-                       Number of splices: AT/AC |       0
-               Number of splices: Non-canonical |       2
-                      Mismatch rate per base, % |       2.14%
-                         Deletion rate per base |       0.04%
-                        Deletion average length |       1.00
-                        Insertion rate per base |       0.00%
-                       Insertion average length |       0.00
-                             MULTI-MAPPING READS:
-        Number of reads mapped to multiple loci |       83
-             % of reads mapped to multiple loci |       0.83%
-        Number of reads mapped to too many loci |       19
-             % of reads mapped to too many loci |       0.19%
-                                  UNMAPPED READS:
-       % of reads unmapped: too many mismatches |       0.02%
-                 % of reads unmapped: too short |       98.31%
-                     % of reads unmapped: other |       0.18%
-                                  CHIMERIC READS:
-                       Number of chimeric reads |       0
-                            % of chimeric reads |       0.00%
-    """
-
-    def __init__(self, log, unique_only=False):
-        self.log = log
-        self.unique_only = unique_only
-        # stat
-        if isinstance(log, Alignment_log):
-            self.stat = log.stat
-        elif isinstance(log, dict):
-            self.stat = log
-        elif os.path.isfile(log):
-            self.stat = self._log_parser()
-        else:
-            raise ValueError('not supported file: %s' % log)
-
-
-    def guess_aligner(self):
-        """Guess the aligner of the log file:
-        bowtie, bowtie2, STAR, ...
-        """
-        # read through log file
-        log_lines = []
-        with open(self.log, 'rt') as ff:
-            for r in ff:
-                if r.startswith('Warning'):
-                    continue
-                log_lines.append(r.strip())
-
-        # parsing log file
-        line = log_lines[0] # the first line
-        if line.startswith('#'):
-            log_parser = self._bowtie_parser
-        elif 'reads; of these' in line:
-            log_parser = self._bowtie2_parser
-        elif '|' in line:
-            log_parser = self._star_parser
-        else:
-            raise ValueError('unknown file format: %s' % self.log)
-            pass
-        return log_parser
-
-
-    def _is_non_empty(self):
-        """Check if log file is empty"""
-        if os.path.getsize(self.log) > 0:
-            return True
-        else:
-            return False
-
-
-    def _bowtie_parser(self):
-        """Wrapper bowtie log
-        unique, multiple, unmap, map, total
-        """
-        dd = {}
-        with open(self.log, 'rt') as ff:
-            for line in ff:
-                if not ':' in line or line.startswith('Warning'):
-                    continue
-                num = line.strip().split(':')[1]
-                value = num.strip().split(' ')[0]
-                value = int(value)
-                if 'reads processed' in line:
-                    dd['total'] = value
-                elif 'at least one reported alignment' in line:
-                    dd['map'] = value
-                elif 'failed to align' in line:
-                    dd['unmap'] = value
-                elif 'alignments suppressed due to -m' in line:
-                    dd['multiple'] = value
-                else:
-                    pass
-        # unique_only
-        dd['unique'] = dd['map']
-        dd['multiple'] = dd.get('multiple', 0) # default 0
-        if self.unique_only:
-            dd['map'] = dd['unique']
-        else:
-            dd['map'] = dd['unique'] + dd['multiple']
-        dd['unmap'] = dd['total'] - dd['unique'] - dd['multiple']
-        return dd
-
-
-    def _bowtie2_parser(self):
-        """Wrapper bowtie2 log"""
-        dd = {}
-        with open(self.log, 'rt') as ff:
-            for line in ff:
-                value = line.strip().split(' ')[0]
-                if '%' in value:
-                    continue
-                value = int(value)
-                if 'reads; of these' in line:
-                    dd['total'] = value
-                elif 'aligned 0 times' in line:
-                    dd['unmap'] = value
-                elif 'aligned exactly 1 time' in line:
-                    dd['unique'] = value
-                elif 'aligned >1 times' in line:
-                    dd['multiple'] = value
-                else:
-                    pass
-        if self.unique_only:
-            dd['map'] = dd['unique']
-        else:
-            dd['map'] = dd['unique'] + dd['multiple']
-        dd['unmap'] = dd['total'] - dd['unique'] - dd['multiple']
-        return dd
-
-
-    def _star_parser(self):
-        """Wrapper STAR *final.log"""
-        dd = {}
-        with open(self.log, 'rt') as ff:
-            for line in ff:
-                value = line.strip().split('|')
-                if not len(value) == 2:
-                    continue
-                value = value[1].strip()
-                if 'Number of input reads' in line:
-                    dd['total'] = int(value)
-                elif 'Uniquely mapped reads number' in line:
-                    dd['unique'] = int(value)
-                elif 'Number of reads mapped to multiple loci' in line:
-                    dd['multiple'] = int(value)
-                else:
-                    pass
-        if self.unique_only is True:
-            dd['map'] = dd['unique']
-        else:
-            dd['map'] = dd['unique'] + dd['multiple']
-        dd['unmap'] = dd['total'] - dd['unique'] - dd['multiple']
-        return dd
-
-
-    def _log_parser(self):
-        """Read log file as dict
-        delimiter:
-        bowtie:  ":"
-        bowtie2:  ":"
-        STAR:  "|"
-
-        extra trimming
-        1. trim "(10.00%)" 
-        2. trim "blank" at both ends
-        """
-        log = self.log
-        log_parser = self.guess_aligner()
-        dd = log_parser()
-        return dd
-
-
-    def _tmp(self):
-        """Create a temp file"""
-        tmpfn = tempfile.NamedTemporaryFile(prefix='tmp',
-                                            suffix='.json',
-                                            delete=False)
-        return tmpfn.name
-
-
-    def saveas(self, _out=None):
-        """Make a copy of statistics of mapping results"""
-        log = self.log
-        if _out is None:
-            # _out = self._tmp()
-            _out = os.path.splitext(log)[0] + '.json'
-
-        dd = self.stat
-
-        with open(_out, 'wt') as fo:
-            json.dump(dd, fo, indent=4, sort_keys=False)
-
-        return _out
-
-
-class Alignment_stat(object):
-    """Parse mapping reads in directory
-    1. for each rep bam, parse json files, 
-    2. merge replicates
-    """
-    def __init__(self, path):
-        self.path = path
-
-        if isinstance(path, Alignment_stat):
-            self.stat = path.stat
-        elif isinstance(path, pd.DataFrame):
-            self.stat = path
-        elif os.path.isdir(path):
-            json_files = self.json_files()
-            bam_files = self.bam_files()
-            if json_files:
-                self.stat = self.rep_stat()
-            elif bam_files:
-                self.stat = self.merge_stat()
-            else:
-                raise ValueError('BAM or json files not found: %s' % path)
-        else:
-            raise ValueError('unknown format')
-
-
-    def _is_non_empty(self, fn):
-        """Check if log file is empty"""
-        if os.path.getsize(fn) > 0:
-            return True
-        else:
-            return False
-
-
-    def findfiles(self, which, where='.'):
-        """Returns list of filenames from `where` path matched by 'which'
-        shell pattern. Matching is case-insensitive.
-        # findfiles('*.ogg')
-        """    
-        # TODO: recursive param with walk() filtering
-        rule = re.compile(fnmatch.translate(which), re.IGNORECASE)
-        hits = [os.path.join(where, name) for name in os.listdir(where) if rule.match(name)]
-        return hits
-
-
-    def json_files(self):
-        """Return all json files in path"""
-        j = self.findfiles('*.json', self.path)
-        j = [i for i in j if self._is_non_empty(i)] # exclude empty json
-        if len(j) == 0:
-            j = None
-        return j
-
-
-    def bam_files(self):
-        """Return all BAM files in path
-        skip symlink
-        # directory of merged fastq, count bam file
-        # to-do: summary replicates (except unmap)
-        """
-        bam_files = self.findfiles('*.bam', self.path)
-        bam_files = [b for b in bam_files if self._is_non_empty(b) and not os.path.islink(b)]
-        if len(bam_files) == 0:
-            bam_files = None
-        return bam_files
-
-
-    def _json_log_reader(self, fn, to_dataframe=True):
-        """Parse json file, save as DataFrame"""
-        if fn is None:
-            return None
-        fn_name = os.path.basename(fn)
-        group, aligner = fn.split('.')[-3:-1] # 
-        group = re.sub('^map_', '', group)
-        dd = Json_file(fn).stat # dict of count
-        rpt = dd
-        if to_dataframe:
-            # total, unique, multiple, unmap
-            df = pd.DataFrame(data=[list(dd.values())], columns=list(dd.keys()))
-            df.pop('map') # drop "map" column
-            df.index = [fn_name]
-            rpt = df
-        return rpt
-
-
-    def rep_stat(self):
-        """Extract alignment log files in directory
-        """
-        path = self.path.rstrip('/')
-        json_files = self.json_files()
-        json_files = sorted(json_files, key=len)
-        prefix = os.path.basename(self.path)
-        # genome_rRNA, genome, sp_rRNA, sp, unmap, map, total
-        if len(json_files) == 2 or len(json_files) == 4:
-            pass
-        else:
-            raise ValueError('number of json files should be; 2|4, [%d]' % len(json_files))
-
-        # genome
-        # map rRNA, genome, spikein_rRNA, spikein
-        json_genome_rRNA, json_genome = json_files[:2]
-        json_sp_rRNA = json_sp = None
-        if len(json_files) == 4:
-            json_sp_rRNA, json_sp = json_files[2:]
-        df1 = self._json_log_reader(json_genome_rRNA, False)
-        df2 = self._json_log_reader(json_genome, False)
-        df3 = self._json_log_reader(json_sp_rRNA, False)
-        df4 = self._json_log_reader(json_sp, False)
-
-        # genome
-        n_total = df1['total']
-        g_rRNA = df1['unique'] + df1['multiple']
-        g_unique = df2['unique']
-        g_multi = df2['multiple']
-        n_unmap = df2['unmap']
-
-        # spikein rRNA
-        if isinstance(df3, pd.DataFrame):
-            sp_rRNA = df3['unique'] + df3['multiple']
-        else:
-            sp_rRNA = 0
-
-        # spikein
-        if isinstance(df4, pd.DataFrame):
-            sp_unique = df4['unique']
-            sp_multi = df4['multiple']
-            n_unmap = df4['unmap']
-        else:
-            sp_unique = sp_multi = 0
-
-        # output
-        data = {
-            'genome_rRNA': g_rRNA,
-            'genome_unique': g_unique,
-            'genome_multiple': g_multi,
-            'spikein_rRNA': sp_rRNA,
-            'spikein_unique': sp_unique,
-            'spikein_multi': sp_multi,
-            'unmap': n_unmap,
-            'total': n_total}
-        df = pd.DataFrame(data, index=[prefix])
-
-        # return
-        return df
-
-
-    def merge_stat(self):
-        """Stat reads for merged sample
-        combine all reads in each replicates
-        no json files detedted in merged directory
-        search *.csv files in up-level directory
-        """
-        merge_path_name = os.path.basename(self.path.rstrip('/'))
-        parent_path = os.path.dirname(self.path.rstrip('/')) # 
-        rep_path = [i for i in os.listdir(parent_path) if not i == merge_path_name]
-        rep_csv_files = [os.path.join(parent_path, i + '.mapping_stat.csv') for i in rep_path]
-        rep_csv_files = [f for f in rep_csv_files if os.path.isfile(f)]
-
-        if len(rep_csv_files) > 0:
-            frames = [pd.read_csv(i, '\t', index_col=0) for i in rep_csv_files]
-            df = pd.concat(frames, axis=0)
-            # merge
-            df_merge = pd.DataFrame(data=[df.sum(axis=0)], columns=list(df.columns.values),
-                index=[merge_path_name])
-            return df_merge
-        else:
-            logging.error('%10s | not contain mapping files: %s' % ('failed', path))
-            return None
-
-
-    def saveas(self, _out=None):
-        """Make a copy of statistics of mapping results"""
-        path = self.path
-        if _out is None:
-            prefix = os.path.basename(path)
-            _out = os.path.join(os.path.dirname(path),
-                                prefix + '.mapping_stat.csv')
-        df = self.stat
-        df.to_csv(_out, sep='\t', header=True, index=True)
-        
-        return _out
-
-
 
 ## EOF
