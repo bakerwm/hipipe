@@ -38,7 +38,7 @@ def findfiles(which, where='.'):
     # findfiles('*.ogg')
     """    
     # TODO: recursive param with walk() filtering
-    rule = re.compile(fnmatch.translate(which), re.IGNORECASE)
+    rule = re.compile(which.translate(which), re.IGNORECASE)
     return [name for name in os.listdir(where) if rule.match(name)]
 
 
@@ -722,16 +722,16 @@ def index_validator(index, aligner='bowtie'):
     4. ...
     """
     # check command
-    aligner_stat = which(aligner)
-    if not aligner_stat:
+    aligner_exe = which(aligner)
+    if not aligner_exe:
         raise ValueError('aligner not detected in $PATH: %s' % aligner)
-    else:
-        aligner = aligner_stat 
+    # else:
+    #     aligner = aligner_exe
 
     flag = False
     if aligner.lower().startswith('bowtie'):
         # bowtie, bowtie2
-        c = [aligner + '-inspect', '-s', index]
+        c = [aligner_exe + '-inspect', '-s', index]
         p = subprocess.run(c, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if len(p.stdout) > 0:
             flag = True
@@ -779,11 +779,9 @@ def index_finder(genome, aligner='bowtie', rRNA=False, genome_path=None):
         idx = os.path.join(genome_path, genome, aligner + '_index', 'genome')
 
     # validate
-    if not index_validator(idx):
+    if not index_validator(idx, aligner):
         idx = None
     return idx
-
-
 
 
 class Genome(object):
@@ -820,7 +818,7 @@ class Genome(object):
         self.genome = genome
         if not genome_path:
             genome_path = os.path.join(pathlib.Path.home(), 'data', 'genome')
-        self.data_path = data_path
+        self.genome_path = genome_path
 
 
     def get_fa(self):
@@ -933,7 +931,7 @@ class Genome(object):
             self.genome + suffix)
         if not os.path.exists(g):
                 g = None
-            return g
+        return g
 
 
     def te(self):
@@ -942,4 +940,43 @@ class Genome(object):
         """
         pass
         # additional Class
+
+
+
+
+class BAM(object):
+    """Operation for BAM files
+    sort, index, ...
+    """
+
+    def __init__(self, fn):
+        self.fn = fn
+
+
+    def bam_index(self):
+        """Create index for BAM file"""
+        bam = self.fn
+        bai = self.fn + '.bai'
+        if not os.path.exists(bai):
+            pysam.index(bam)
+
+
+    def bam_sort(self):
+        """Sort bam fle"""
+        pass
+
+
+    def to_bed(self, bed=None):
+        """Convert BAM to bed using bedtools"""
+        bam = self.fn
+        bed = os.path.splitext(bam)[0] + '.bed'
+        if not bed:
+            pybedtools.BedTool(bam).bam_to_bed().saveas(bed)
+        return bed
+
+
+
+
+
+
 
