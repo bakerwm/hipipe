@@ -62,15 +62,15 @@ def which(program):
 
 ##-------------------------------------------##
 ## formatter
-def nested_dict_values(d):
-    """
-    get all values from nested dict
-    """
-    for v in d.values():
-        if isinstance(v, dict):
-            yield from nested_dict_values(v)
-        else:
-            yield v
+# def nested_dict_values(d):
+#     """
+#     get all values from nested dict
+#     """
+#     for v in d.values():
+#         if isinstance(v, dict):
+#             yield from nested_dict_values(v)
+#         else:
+#             yield v
             
 
 def is_gz(filepath):
@@ -942,8 +942,6 @@ class Genome(object):
         # additional Class
 
 
-
-
 class BAM(object):
     """Operation for BAM files
     sort, index, ...
@@ -953,7 +951,7 @@ class BAM(object):
         self.fn = fn
 
 
-    def bam_index(self):
+    def index(self):
         """Create index for BAM file"""
         bam = self.fn
         bai = self.fn + '.bai'
@@ -961,7 +959,7 @@ class BAM(object):
             pysam.index(bam)
 
 
-    def bam_sort(self):
+    def sort(self):
         """Sort bam fle"""
         pass
 
@@ -975,8 +973,14 @@ class BAM(object):
         return bed
 
 
-
-
-
-
-
+    def is_indexed(self, overwrite=False):
+        """Check if *.bai file exists"""
+        bai = self.fn + '.bai'
+        if os.path.exists(bai) and overwrite is False:
+            return True
+        else:
+            pysam.index(self.fn)
+            if os.path.exists(bai):
+                return True
+            else:
+                return False
