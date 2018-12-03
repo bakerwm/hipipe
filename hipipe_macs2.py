@@ -89,7 +89,7 @@ class Macs2(object):
     5. 
     """
 
-    def __init__(self, ip, control, genome, output, prefix=None, venv=None):
+    def __init__(self, ip, control, genome, output, prefix=None, venv=None, overwrite=False):
         """Parse the parameters
         venv, the virtualenv created for macs2, running in Python2
         """
@@ -97,6 +97,7 @@ class Macs2(object):
         self.control = control
         self.genome = genome
         self.output = output
+        self.overwrite = overwrite
         if prefix is None:
             prefix = file_prefix(ip)[0]
             # prefix = os.path.splitext(os.path.basename(ip))[0]
@@ -150,7 +151,12 @@ class Macs2(object):
         c = "macs2 callpeak -f BAM -t %s -c %s -g %s --outdir %s -n %s --broad \
             --keep-dup auto -B --SPMR" % (self.ip, self.control, genome_size,
             self.output, self.prefix)
-        self.python2_run(c)
+        # output file
+        macs2_out = os.path.join(self.output, self.prefix + '_peaks.xls')
+        if os.path.exists(macs2_out) and self.overwrite is False:
+            logging.info('file exists, skip macs2 callpeak')
+        else:
+            self.python2_run(c)
 
 
     def bdgcmp(self, opt='ppois'):
@@ -158,8 +164,8 @@ class Macs2(object):
         {ppois,qpois,subtract,logFE,FE,logLR,slogLR,max}
         """
         # use output of callpeak
-        ip_bdg = os.path.join(self.output, prefix + '_treat_pileup.bdg')
-        input_bdg = os.path.join(self.output, prefix + '_control_lambda.bdg')
+        ip_bdg = os.path.join(self.output, self.prefix + '_treat_pileup.bdg')
+        input_bdg = os.path.join(self.output, self.prefix + '_control_lambda.bdg')
 
         if not os.path.exists(ip_bdg) or not os.path.exists(input_bdg):
             raise ValueError('*.bdg file not found, need to run .callpeak() first')
@@ -171,11 +177,27 @@ class Macs2(object):
         else:
             opt_ext = ''
 
-        out_bdg = os.path.join(self.output, prefix + '.' + opt + '.bdg')
-        log = os.path.join(self.output, prefix + '.macs2.bdgcmp.out')
-
+        out_bdg = os.path.join(self.output, self.prefix + '.' + opt + '.bdg')
+        log = os.path.join(self.output, self.prefix + '.macs2.bdgcmp.out')
         c = "macs2 bdgcmp -t %s -c %s -o %s -m %s %s" % (ip_bdg, input_bdg, out_bdg, opt, opt_ext)
-        self.python2_run(c)
+        
+        if os.path.exists(out_bdg) and self.overwrite is False:
+            logging.info('file exists, skip macs2 bdgcmp')
+        else:
+            self.python2_run(c)
+
+        # sort output *.bdg
+        c1 = 'sort -k1,1 -k2,2n -o %s %s' % (out_bdg, out_bdg)
+
+        # cnvert *.bdg to *.bigWig
+        gsize_file = Genome(self.genome).get_fasize()
+        out_bw  = os.path.join(self.output, self.prefix + '.' + opt + '.bigWig')
+        c2 = 'bedGraphToBigWig %s %s %s' % (out_bdg, gsize_file, out_bw)
+        if os.path.exists(out_bw) and self.overwrite is False:
+            logging.info('file exists, skip bg2bw')
+        else:
+            subprocess.run(shlex.split(c1)) # sort bdg
+            subprocess.run(shlex.split(c2)) # convert bdg to bw
 
 
     def bdgpeakcall(self):

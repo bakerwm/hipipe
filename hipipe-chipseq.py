@@ -86,7 +86,7 @@ def get_args():
     parser.add_argument('--aligner', default='bowtie2', 
         choices=['bowtie', 'bowtie2', 'star'],
         help='Choose which aligner to use. default: bowtie2')
-    parser.add_argument('-x', nargs='+', metavar='align_index',
+    parser.add_argument('-x', metavar='align_index',
         help='A fasta file used to do post-genomic mapping and analysis. For \
         example, -x FL10B.fa, after mapping reads to genome, reads are mapped to \
         FL10B sequence.')
@@ -117,7 +117,77 @@ def prepare_project(path):
     return prj_dict
 
 
-def main():
+# def chipseq_te(input_bam, ip_bam):
+#     """Run ChIPseq analysis on TE consensus sequences,
+#     including GFP, white, Firefly sequences"""
+#     args = get_args()
+#     if args.o is None:
+#         args.o = str(pathlib.Path.cwd())
+
+#     # subdirs
+#     prj_path = prepare_project(args.o)
+#     te_path = prj_path['transposon_analysis']
+
+#     # make bigWig
+#     # normalized by macs2 output, effective tags
+#     # search IP and Input BAM files
+
+#     # control
+#     ctl_fqs = [f.name for f in args.c]
+#     if args.C is None:
+#         ctl_prefix = str_common([os.path.basename(f) for f in ctl_fqs])
+#         ctl_prefix = ctl_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
+#         args.C = ctl_prefix
+#     ctl_path = os.path.join(prj_path['genome_mapping'], args.C)
+
+
+#     # treatment
+
+
+
+def bigwig2track_single(ip_bw, input_bw, fasize, n, pdf_out):
+    """Create track view plots for TE consensus"""
+
+    # R script
+    r_code = os.path.splitext(pdf_out)[0] + '.R'
+
+    c1 = """
+#!/usr/bin/Rscript
+library(goldclipReport)
+library(rtracklayer)
+library(trackViewer)
+library(ggridges)
+    """
+
+    c2 = 'ip_bw    <- %s' % ip_bw
+    c3 = 'input_bw <- %s' % input_bw
+    c4 = 'fasize   <- %s' % fasize
+    c5 = 'n        <- "%s"' % n
+    c6 = 'pdf_out  <- %s' % pdf_out
+    c7 = """
+df_list <- chipseq_bw_parser(ip_bw, fasize, input_bw, n)
+
+plist <- lapply(df_list, function(d){
+  coverage_plot_single(d, fill.color = "orange",
+                      exclude.minus.scores = TRUE)
+})
+
+plot_n_pages(plist, nrow = 5, ncol = 2, pdf_out = pdf_out)
+    """
+
+    c = '\n'.join([c1, c2, c3, c4, c5, c6, c7])
+
+    with open(r_code, 'wt') as fo:
+        fo.write(c)
+
+    # subprocess.run(shlex.split('Rscripts %s') % r_code)
+
+
+
+
+
+
+def chipseq_genome():
     args = get_args()
     if args.o is None:
         args.o = str(pathlib.Path.cwd())
@@ -142,7 +212,7 @@ def main():
         ctl_prefix = ctl_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
         args.C = ctl_prefix
     ctl_path = os.path.join(prj_path['genome_mapping'], args.C)
-    ctl_bam_files = Alignment(
+    ctl_bam_files, ext_ctl_bam_files = Alignment(
         ctl_fqs, ctl_path, 
         smp_name=args.C,
         genome=args.g,
@@ -164,7 +234,7 @@ def main():
         tre_prefix = tre_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
         args.T = tre_prefix
     tre_path = os.path.join(prj_path['genome_mapping'], args.T)
-    tre_bam_files = Alignment(
+    tre_bam_files, ext_tre_bam_files = Alignment(
         tre_fqs, tre_path, 
         smp_name=args.T,
         genome=args.g,
@@ -178,19 +248,6 @@ def main():
         merge_rep=False,
         path_data=args.path_data,
         overwrite=args.overwrite).run()
-
-
-    # ## create bigWig files ##
-    # map_bam_files = ctl_bam_files + tre_bam_files
-    # bw_path = prj_path['bigWig']
-    # for bam in map_bam_files:
-    #     bam2bigwig(
-    #         bam=bam, 
-    #         genome=args.g, 
-    #         path_out=bw_path, 
-    #         strandness=args.s, 
-    #         binsize=args.bin_size, 
-    #         overwrite=args.overwrite)
 
     # ## mapping stat ##
     # map_stat_path = prj_path['report']
@@ -211,12 +268,6 @@ def main():
     ################
     ## call peaks ##
     ################
-    # p = Macs2(ip=tre, control=ctl, genome='dm3', output=out, prefix=None)
-    # p.callpeak()
-    # p.bdgcmp()
-    # d = p.get_effect_size()
-    # print(d)
-    # # p.bdgcmp(opt='ppois')
     ## for each replicates
     for tre_bam in tre_bam_files:
         i = tre_bam_files.index(tre_bam)
@@ -225,14 +276,70 @@ def main():
         ctl_bam = ctl_bam_files[i]
         # output directory
         tre_bam_prefix = file_prefix(tre_bam)[0]
-        tre_bam_path = os.path.join()
-        Macs2(ip=tre_bam, control=ctl_bam, genome=args.g, output=out, prefix=prefix)
+        tre_bam_path = os.path.join(prj_path['macs2_output'], tre_bam_prefix)
+        p = Macs2(ip=tre_bam, control=ctl_bam, genome=args.g, output=tre_bam_path, 
+            prefix=tre_bam_prefix)
+        # call peaks
+        p.callpeak()
+        p.bdgcmp(opt='ppois')
+        p.bdgcmp(opt='FE')
+        p.bdgcmp(opt='logLR')
+
+    ###################
+    ## create bigWig ##
+    ###################
+    # map_bam_files = ctl_bam_files + tre_bam_files
+    # bw_path = prj_path['bigWig']
+    # for bam in map_bam_files:
+    #     bam2bigwig(
+    #         bam=bam, 
+    #         genome=args.g, 
+    #         path_out=bw_path, 
+    #         strandness=args.s, 
+    #         binsize=args.bin_size, 
+    #         overwrite=args.overwrite)
+
+    #########################
+    ## transposon analysis ##
+    #########################
+    if isinstance(ctl_bam_files, list) and isinstance(tre_bam_files, list):
+        # fetch the scale
+        te_path = prj_path['transposon_analysis']
+        for i in ext_tre_bam_files:
+            i_index = ext_tre_bam_files.index(i)
+            # genome mapping BAM
+            ext_tre_bam = i[0]
+            tre_bam = tre_bam_files[i_index]
+            if i_index >= len(ext_ctl_bam_files):
+                i_index = 0
+            ext_ctl_bam = ext_ctl_bam_files[i_index][0]
+            ctl_bam = ctl_bam_files[i_index]
+            # fetch the normalize scale
+            tre_bam_prefix = file_prefix(tre_bam)[0]
+            tre_bam_path = os.path.join(prj_path['macs2_output'], tre_bam_prefix)
+            p = Macs2(ip=tre_bam, control=ctl_bam, genome=args.g, output=tre_bam_path, 
+                prefix=tre_bam_prefix)
+            d = p.get_effect_size() # ip_scale, ip_depth, input_scale, input_depth
+
+            # bam to bigWig            
+            te_sub_path = os.path.join(te_path, tre_bam_prefix)
+            bam2bigwig2(ext_tre_bam, te_sub_path, scale=d['ip_scale'], 
+                overwrite=args.overwrite)
+            bam2bigwig2(ext_ctl_bam, te_sub_path, scale=d['input_scale'], 
+                overwrite=args.overwrite)
+
+            # save scale to file            
+            s = os.path.join(te_sub_path, 'scale.lib')
+            with open(s, 'wt') as fo:
+                fo.write(json.dumps(d))
+
+            # create coverage plots
+            pdf_out = os.path.join(te_sub_path, tre_bam_prefix + '.track_view.pdf')
+            fasize  = 'abc.fa'
+            bigwig2track_single(ext_tre_bam, ext_ctl_bam, fasize, 'P5', pdf_out)
 
 
-    print('control')
-    print(ctl_bam_files)
-    print('treatment')
-    print(tre_bam_files)
+    # return [ctl_bam_files, tre_bam_files]
 
 
 
@@ -242,101 +349,11 @@ def main():
 
 
 
-    # #########################
-    # ## Transposon analysis ##
-    # #########################
-    # logging.info('## For Transposon analysis ##')
-    # te_path = prj_path['transposon_analysis']
-    # ## mapping ##
-    # te_mapping_path = os.path.join(te_path, 'genome_mapping')
-    # assert is_path(te_mapping_path)
-    # # control
-    # ctl_fqs = [f.name for f in args.a]
-    # ctl_prefix = str_common([os.path.basename(f) for f in ctl_fqs])
-    # ctl_prefix = ctl_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
-    # if args.A is None:
-    #     args.A = ctl_prefix
-    # te_ctl_path = os.path.join(te_mapping_path, args.A)
-    # te_ctl_bam_files = Alignment(
-    #     fqs=ctl_fqs, 
-    #     path_out=te_ctl_path, 
-    #     smp_name=args.A,
-    #     genome=args.g,
-    #     spikein=args.k,
-    #     index_ext=args.x,
-    #     multi_cores=args.p,
-    #     unique_only=args.unique_only, 
-    #     aligner=args.aligner,
-    #     align_to_rRNA=args.align_to_rRNA,
-    #     path_data=args.path_data,
-    #     overwrite=args.overwrite).run()
-
-    # # treatment
-    # tre_fqs = [f.name for f in args.b]
-    # tre_prefix = str_common([os.path.basename(f) for f in tre_fqs])
-    # tre_prefix = tre_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
-    # if args.B is None:
-    #     args.B = tre_prefix
-    # te_tre_path = os.path.join(te_mapping_path, args.B)
-    # te_tre_bam_files = Alignment(
-    #     fqs=tre_fqs, 
-    #     path_out=te_tre_path, 
-    #     smp_name=args.B,
-    #     genome=args.g,
-    #     spikein=args.k,
-    #     index_ext=args.x,
-    #     multi_cores=args.p,
-    #     unique_only=args.unique_only, 
-    #     aligner=args.aligner,
-    #     align_to_rRNA=args.align_to_rRNA,
-    #     path_data=args.path_data,
-    #     overwrite=args.overwrite).run()
 
 
-    # # ## create bigWig files ##
-    # te_map_bam_files = te_ctl_bam_files + te_tre_bam_files
-    # te_bw_path = os.path.join(te_path, 'bigWig')
-    # assert is_path(te_bw_path)
-    # # for bam in te_map_bam_files:
-    # #     bam2bigwig(
-    # #         bam=bam, 
-    # #         genome=args.g, 
-    # #         path_out=bw_path, 
-    # #         strandness=args.s, 
-    # #         binsize=args.bin_size, 
-    # #         overwrite=args.overwrite)
-
-    # # ## count ##
-    # te_count_path = os.path.join(te_path, 'count')
-    # assert is_path(te_count_path)
-    # te_count_file = os.path.join(te_count_path, 'count.txt')
-    # # !!!!
-    # te_gtf = '/home/data/genome/dm3/dm3_transposon/dm3.transposon.gtf'
-    # # only kepp replicate samples
-    # te_map_bam_files = [f for f in te_map_bam_files if '_rep' in f]
-    # te_count_file = fc_run(te_gtf, te_map_bam_files, te_count_file,
-    #     args.s, overwrite=args.overwrite)
-
-    # # ## DE analysis ##
-    # # using R code #
-    # # de_run(args.A, args.B, count_file)
-    # te_de_path = os.path.join(te_path, 'de_analysis')
-    # run_deseq2 = '/home/wangming/work/wmlib/hipipe/run_deseq2.R'
-    # c1 = '/usr/bin/Rscript %s %s %s' % (run_deseq2, te_count_file, te_path)
-    # subprocess.run(shlex.split(c1))
-
-
-    # ## mapping stat ##
-    # te_stat_path = os.path.join(te_path, 'report')
-    # # map_stat_path = prj_path['report']
-    # te_stat_file = os.path.join(te_stat_path, 'mapping.stat')
-    # te_ctl_map = map_stat(te_ctl_path)
-    # te_tre_map = map_stat(te_tre_path)
-    # df_map = pd.concat([te_ctl_map, te_tre_map], axis=0).reset_index()
-    # df_map = df_map.sort_values(['index'])
-    # print(df_map)
-    # df_map.to_csv(te_stat_file, sep='\t', header=True, index=False)
-
+def main():
+    chipseq_genome()
+    # chipseq_te()
 
 
 if __name__ == '__main__':
