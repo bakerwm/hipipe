@@ -38,7 +38,7 @@ def findfiles(which, where='.'):
     # findfiles('*.ogg')
     """    
     # TODO: recursive param with walk() filtering
-    rule = re.compile(fnmatch.translate(which), re.IGNORECASE)
+    rule = re.compile(which.translate(which), re.IGNORECASE)
     return [name for name in os.listdir(where) if rule.match(name)]
 
 
@@ -62,15 +62,15 @@ def which(program):
 
 ##-------------------------------------------##
 ## formatter
-def nested_dict_values(d):
-    """
-    get all values from nested dict
-    """
-    for v in d.values():
-        if isinstance(v, dict):
-            yield from nested_dict_values(v)
-        else:
-            yield v
+# def nested_dict_values(d):
+#     """
+#     get all values from nested dict
+#     """
+#     for v in d.values():
+#         if isinstance(v, dict):
+#             yield from nested_dict_values(v)
+#         else:
+#             yield v
             
 
 def is_gz(filepath):
@@ -617,6 +617,26 @@ def bed_parser(fn, usecols = None):
 #     c = ((dx['start'] >=  0) & dx['end'] >=  0) & (dx['start'] < dx['end'])
 #     return df.loc[c, :]
 
+def bam2bigwig2(bam, path_out, scale=1, binsize=1, overwrite=False):
+    """Convert BAM to bigWig using deeptools"""
+    bamcoverage_exe = which('bamCoverage')
+    BAM(bam).is_indexed() # check *.bai file
+    is_path(path_out) # create path
+    prefix = os.path.basename(os.path.splitext(bam)[0])
+    bw_out = os.path.join(path_out, prefix + '.bigWig')
+    bw_log = os.path.join(path_out, prefix + '.log')
+    c = '%s --bam %s -o %s --scaleFactor %s --binSize %s' % (bamcoverage_exe, 
+        bam, bw_out, scale, binsize)
+    if os.path.exists(bw_out) and overwrite is False:
+       logging.info('bigWig file exists, %s' % bw_out) 
+    else:
+        with open(bw_log, 'wt') as fo:
+            subprocess.run(shlex.split(c), stdout=fo, stderr=fo)
+        if not os.path.exists(bw_out):
+            raise ValueError('failed to create bigWig file, %s' % bw_out)
+
+
+
 ## utilities
 def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False):
     """Convert bam to bigWig using deeptools
@@ -722,16 +742,16 @@ def index_validator(index, aligner='bowtie'):
     4. ...
     """
     # check command
-    aligner_stat = which(aligner)
-    if not aligner_stat:
+    aligner_exe = which(aligner)
+    if not aligner_exe:
         raise ValueError('aligner not detected in $PATH: %s' % aligner)
-    else:
-        aligner = aligner_stat 
+    # else:
+    #     aligner = aligner_exe
 
     flag = False
     if aligner.lower().startswith('bowtie'):
         # bowtie, bowtie2
-        c = [aligner + '-inspect', '-s', index]
+        c = [aligner_exe + '-inspect', '-s', index]
         p = subprocess.run(c, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if len(p.stdout) > 0:
             flag = True
@@ -779,11 +799,9 @@ def index_finder(genome, aligner='bowtie', rRNA=False, genome_path=None):
         idx = os.path.join(genome_path, genome, aligner + '_index', 'genome')
 
     # validate
-    if not index_validator(idx):
+    if not index_validator(idx, aligner):
         idx = None
     return idx
-
-
 
 
 class Genome(object):
@@ -820,7 +838,7 @@ class Genome(object):
         self.genome = genome
         if not genome_path:
             genome_path = os.path.join(pathlib.Path.home(), 'data', 'genome')
-        self.data_path = data_path
+        self.genome_path = genome_path
 
 
     def get_fa(self):
@@ -933,7 +951,7 @@ class Genome(object):
             self.genome + suffix)
         if not os.path.exists(g):
                 g = None
-            return g
+        return g
 
 
     def te(self):
@@ -943,3 +961,46 @@ class Genome(object):
         pass
         # additional Class
 
+
+class BAM(object):
+    """Operation for BAM files
+    sort, index, ...
+    """
+
+    def __init__(self, fn):
+        self.fn = fn
+
+
+    def index(self):
+        """Create index for BAM file"""
+        bam = self.fn
+        bai = self.fn + '.bai'
+        if not os.path.exists(bai):
+            pysam.index(bam)
+
+
+    def sort(self):
+        """Sort bam fle"""
+        pass
+
+
+    def to_bed(self, bed=None):
+        """Convert BAM to bed using bedtools"""
+        bam = self.fn
+        bed = os.path.splitext(bam)[0] + '.bed'
+        if not bed:
+            pybedtools.BedTool(bam).bam_to_bed().saveas(bed)
+        return bed
+
+
+    def is_indexed(self, overwrite=False):
+        """Check if *.bai file exists"""
+        bai = self.fn + '.bai'
+        if os.path.exists(bai) and overwrite is False:
+            return True
+        else:
+            pysam.index(self.fn)
+            if os.path.exists(bai):
+                return True
+            else:
+                return False

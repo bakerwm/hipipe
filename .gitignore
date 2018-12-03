@@ -1,6 +1,7 @@
 # Compiled python modules
 *.pyc
 build/
+demo/
 
 # Setuptools distribution folder
 /dist/

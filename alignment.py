@@ -12,6 +12,7 @@ import re
 import io
 import glob
 import json
+import fnmatch
 import tempfile
 import shlex
 import subprocess
@@ -19,184 +20,173 @@ import logging
 import pandas as pd
 import pysam
 import pybedtools
+from operator import is_not
+from functools import partial
+
 from utils_parser import Json_file
 from helper import *
 
 
 class Alignment(object):
-    """Run alignment using bowtie/bowtie2/STAR, SE reads"""
+    """Run alignment for SE reads using bowtie/bowtie2/STAR"""
 
-    def __init__(self, fqs, path_out, smp_name, genome, spikein=None,
-                 index_ext=None, multi_cores=1, unique_only=False, 
-                 n_map=0, aligner='bowtie', align_to_rRNA=False, 
-                 path_data=None, overwrite=False):
+    def __init__(self, fqs, path_out, smp_name, genome, **kwargs):
+        """parse arguments
+        required arguments: fqs, path_out, smp_name, genome, genome, spikein,
+        index_ext, threads, unique_only, n_map, aligner, align_to_rRNA,
+        genome_path, overwrite
+        """
         self.fqs = fqs
         self.path_out = path_out
         self.smp_name = smp_name
         self.genome = genome
-        self.index_ext = index_ext
-        self.spikein = spikein
-        self.multi_cores = multi_cores
-        self.unique_only = unique_only
-        self.n_map = n_map
-        self.aligner = aligner
-        self.align_to_rRNA = align_to_rRNA
-        self.path_data = path_data
-        self.overwrite = overwrite
-        ## wrapper parameters
-        self.args = self.get_args()
-        
+        self.kwargs = kwargs
+        self.args = self._args_init()
 
 
-    def get_args(self):
-        """Parse parameters"""
-        args = {'fqs' : self.fqs,
-                'path_out' : self.path_out,
-                'smp_name' : self.smp_name,
-                'genome' : self.genome,
-                'spikein' : self.spikein,
-                'index_ext' : self.index_ext,
-                'multi_cores' : self.multi_cores,
-                'unique_only' : self.unique_only,
-                'n_map' : self.n_map,
-                'aligner' : self.aligner,
-                'align_to_rRNA' : self.align_to_rRNA,
-                'path_data' : self.path_data,
-                'overwrite' : self.overwrite
-                }
-        assert isinstance(args['fqs'], list)
-        assert is_path(args['path_out'])
-        assert isinstance(args['smp_name'], str)
-        assert isinstance(args['genome'], str)
-        assert isinstance(args['multi_cores'], int)
-        assert isinstance(args['unique_only'], bool)
-        assert isinstance(args['aligner'], str)
-        assert isinstance(args['align_to_rRNA'], bool)
-        assert isinstance(args['overwrite'], bool)
+    def _args_init(self):
+        """Inititate the arguments, assign the default values to arg
+        """
+        args = self.kwargs
+        args['fqs'] = self.fqs
+        args['path_out'] = self.path_out
+        args['smp_name'] = self.smp_name
+        args['genome'] = self.genome
+        args['spikein'] = args.get('spikein', None)
+        args['index_ext'] = args.get('index_ext', None)
+        args['threads'] = args.get('threads', 1)
+        args['unique_only'] = args.get('unique_only', False)
+        args['n_map'] = args.get('n_map', 0)
+        args['aligner'] = args.get('aligner', 'bowtie')
+        args['align_to_rRNA'] = args.get('align_to_rRNA', True)
+        args['merge_rep'] = args.get('merge_rep', True)
+        args['genome_path'] = args.get('genome_path', None)
+        args['overwrite'] = args.get('overwrite', False)
+        # check
+        if args['spikein'] == self.genome:
+            args['spikein'] = None #
         return args
 
 
+    def _path_init(self, fq, index, reference=None, align_path=None):
+        """Create folders for the alignment, 
+        Alignment, genome versions
+        1.genome_rRNA
+        2.genome
+        3.spikein_rRNA
+        4.spikein
 
-    def get_align_index(self):
-        """Get genome index"""
+        return files:
+        prefix, bam, bed, log, unmap
+        """
         args = self.args
 
-        # spikein index
-        if args['spikein'] == args['genome'] or args['spikein'] is None:
-            idxes = []
-        else:
-            sp_idx = idx_picker(
-                args['spikein'], 
-                path_data=args['path_data'], 
-                aligner=args['aligner'])
-            idxes = [sp_idx, ]
+        if not reference:
+            reference = args['genome'] # default is reference genome
+        if not align_path:
+            align_path = args['path_out']
 
-        # genome index
-        if args['align_to_rRNA'] is True:
-            sg_idx = idx_grouper(
-                args['genome'],
-                path_data=args['path_data'], 
-                aligner=args['aligner'])
-            idxes.extend(sg_idx) # add genome list
-        else:
-            sg_idx = idx_picker(
-                args['genome'], 
-                path_data=args['path_data'], 
-                aligner=args['aligner'])
-            idxes.append(sg_idx) # add genome item
-
-        # remove possible duplicates, zero-records
-        idxes = list(filter(None.__ne__, idxes)) # remove None
-        idxes = list(dict.fromkeys(idxes)) # keep orders
-        if len(idxes) == 0:
-            raise ValueError('genome index not exists: %s' % args['path_data'])
-        return idxes
-
-
-
-    def init_dir(self, fq, idx, fq_path=None):
-        """Prepare directory, file name for each fastq and index"""
-        assert os.path.exists(fq)
-        assert isinstance(idx, str)
-        args = self.args
-        if fq_path is None:
-            fq_path = args['path_out']
-
-        fq_prefix = file_prefix(fq)[0] #
+        fq_prefix = file_prefix(fq)[0]
         fq_prefix = re.sub('\.clean|\.nodup|\.cut', '', fq_prefix)
         fq_type = seq_type(fq)
-        idx_name = os.path.basename(idx)
-        # fq_path = os.path.join(args['path_out'], fq_prefix)
-        assert is_path(fq_path) # create sub-directory
-        
-        map_suffix = os.path.join(fq_path, '%s.map_%s' % (fq_prefix, idx_name))
-        unmap_suffix = os.path.join(fq_path, '%s.not_%s' % (fq_prefix, idx_name))
-        map_bam = map_suffix + '.bam'
-        map_bed = map_suffix + '.bed'
-        map_log = map_suffix + '.%s.log' % args['aligner']
-        unmap_fq = unmap_suffix + '.%s' % fq_type
-        return [fq_prefix, map_bam, map_bed, map_log, unmap_fq]       
 
+        map_prefix = os.path.join(align_path, '%s.map_%s' % (fq_prefix, reference))
+        unmap_prefix = os.path.join(align_path, '%s.not_%s' % (fq_prefix, reference))
+        map_bam = map_prefix + '.bam'
+        # map_bed = map_prefix + '.bed'
+        map_log = map_prefix + '.%s.log' % args['aligner']
+        unmap_fq = unmap_prefix + '.%s' % fq_type
 
+        return [fq_prefix, map_bam, map_log, unmap_fq, reference]
 
-    def bam_index(self, bam):
-        """Run index"""
-        assert isinstance(bam, str)
-        assert os.path.exists(bam)
-        bai = bam + '.bai'
-        if self.overwrite is False and os.path.exists(bai):
-            pass
+    
+    def _index_builder(self, rRNA=False, genome=None):
+        """Return the genome index
+        """
+        args = self.args
+        aligner = args['aligner']
+
+        if not genome:
+            genome = self.genome
+        # check aligner
+        if aligner == 'bowtie':
+            index = Genome(genome).bowtie_index(rRNA=rRNA)
+        elif aligner == 'bowtie2':
+            index = Genome(genome).bowtie2_index(rRNA=rRNA)
+        elif aligner == 'STAR':
+            index = Genome(genome).star_index(rRNA=rRNA)
         else:
-            pysam.index(bam)
-        return bai
+            logging.error('unknown aligner: %s' % aligner)
+            index = None # unknonwn aligner
+        return index
 
 
+    def _index_list(self):
+        """List the align index (es) for the job
+        rRNA, reference, genome
+        """
+        args = self.args
 
-    def bam_to_bed(self, bam):
-        """Convert bam to bed"""
-        assert isinstance(bam, str)
-        assert os.path.exists(bam)
-        bed = os.path.splitext(bam)[0] + '.bed'
-        if self.overwrite is False and os.path.exists(bed):
-            pass
-        else:
-            pybedtools.BedTool(bam).bam_to_bed().saveas(bed)
-        return bed
+        # aligner index
+        idx = {
+            'genome_rRNA': self._index_builder(rRNA=True),
+            'genome': self._index_builder(rRNA=False),
+            'sp_rRNA': self._index_builder(rRNA=True, genome=args['spikein']),
+            'sp': self._index_builder(rRNA=False, genome=args['spikein'])}
 
+        # determine
+        if not args['align_to_rRNA']:
+            idx['genome_rRNA'] = None
+
+        # save in dict
+        return idx # dictionary
 
 
     def wrap_log(self, log):
         """Wrapper alignment log file, save as json"""
-        assert isinstance(log, str)
-        assert os.path.getsize(log) > 0
         args = self.args
         j_file = Alignment_log(log, args['unique_only']).saveas() # save as json
 
 
+    def bowtie_se(self, fq, index, reference=None, unique_map=False, align_path=None):
+        """Run bowtie
 
-    def bowtie_se(self, fq, idx, fq_path=None):
-        """Run bowtie, default kwargs"""
-        assert os.path.exists(fq)
-        assert isinstance(idx, str)
+        arguments:
+        reference: genome, genome_rRNA, spikein, spikein_rRNA
+        """
         args = self.args
-        prefix, map_bam, map_bed, map_log, unmap_fq = self.init_dir(fq, idx, fq_path)
 
-        para_fq = '-f' if seq_type(fq) == 'fasta' else '-q'
+        bowtie_exe = which('bowtie')
+        if not align_path:
+            align_path = args['path_out']
+
+        # output directory
+        prefix, map_bam, map_log, unmap, reference = self._path_init(fq, index, 
+            reference, align_path)
+
+        # determine parameters
         n_map = args['n_map']
-        if args['unique_only'] is True:
-            para_bowtie = '-m 1'
+        if n_map < 1:
+            n_map = 1 # default
+        if unique_map:
+            para_unique = '-m 1'
         else:
-            n_map = 1 if n_map == 0 else n_map
-            para_bowtie = '-k %s' % n_map
+            para_unique = '-v 2 -k %s' % n_map # default: 1
 
-        if os.path.exists(map_bam) and args['overwrite'] is False:
-            logging.info('file exists, alignment skipped: %s' % map_bam)
+        if seq_type(fq) == 'fasta':
+            para_fq = '-f'
         else:
-            c1 = 'bowtie %s %s -p %s --mm --best --sam --no-unal --un %s %s \
-                  %s' % (para_fq, para_bowtie, args['multi_cores'], unmap_fq, 
-                         idx, fq)
-            c2 = 'samtools view -bhS -F 0x4 -@ %s -' % args['multi_cores']
-            c3 = 'samtools sort -@ %s -o %s -' % (args['multi_cores'], map_bam)
+            para_fq = '-q'
+
+        # file exists
+        if os.path.exists(map_bam) and args['overwrite'] is False:
+            logging.info('bam file exists: %s' % map_bam)
+        else:
+            c1 = '%s %s %s -p %s --mm --best --sam --no-unal --un %s %s \
+                %s' % (bowtie_exe, para_fq, para_unique, args['threads'], 
+                    unmap, index, fq)
+            c2 = 'samtools view -bhS -F 0x4 -@ %s -' % args['threads']
+            c3 = 'samtools sort -@ %s -o %s -' % (args['threads'], map_bam)
             with open(map_log, 'wt') as ff:
                 p1 = subprocess.Popen(shlex.split(c1), stdout=subprocess.PIPE,
                                       stderr=ff)
@@ -207,70 +197,93 @@ class Alignment(object):
 
         # process log file
         self.wrap_log(map_log)
-        return [map_bam, unmap_fq]
+        return [map_bam, unmap]
 
 
+    def bowtie2_se(self, fq, index, reference=None, unique_map=False, align_path=None):
+        """Run bowtie2
 
-    def bowtie2_se(self, fq, idx, fq_path=None):
-        """Run bowtie2, default kwargs"""
-        assert os.path.exists(fq)
-        assert isinstance(idx, str)
+        arguments:
+        reference: genome, genome_rRNA, spikein, spikein_rRNA
+        """
         args = self.args
-        prefix, map_bam, map_bed, map_log, unmap_fq = self.init_dir(fq, idx, fq_path)
 
-        para_fq = '-f' if seq_type(fq) == 'fasta' else '-q'
+        bowtie2_exe = which('bowtie2')
+        if not align_path:
+            align_path = args['path_out']
+
+        # output directory
+        prefix, map_bam, map_log, unmap, reference = self._path_init(fq, index, 
+            reference, align_path)
+        
+        # determine parameters
+        if unique_map:
+            para_unique = '-q 10'
+        else:
+            para_unique = '-q 0'
+        
+        # multi map
         n_map = args['n_map']
-        para_bowtie2 = ''
-        if args['unique_only'] is True:
-            para_bowtie2 = '-q 10'
-        else:
-            n_map = 1 if n_map == 0 else n_map
-            para_fq += ' -k %s' % n_map
+        if n_map == 0:
+            n_map == 1 # default 1, report 1 hit for each read
+        para_fq = '-k %s' % n_map
 
-        if os.path.exists(map_bam) and args['overwrite'] is False:
-            logging.info('file exists, alignemnt skipped: %s' % map_bam)
+        # fq type
+        if seq_type(fq) == 'fasta':
+            para_fq = para_fq + ' -f'
         else:
-            c1 = 'bowtie2 %s -p %s --mm --no-unal --un %s \
-                  -x %s %s' % (para_fq, args['multi_cores'], unmap_fq, idx, fq)
-            c2 = 'samtools view -bhS -F 0x4 -@ %s %s -' % (args['multi_cores'],
-                                                           para_bowtie2)
-            c3 = 'samtools sort -@ %s -o %s -' % (args['multi_cores'], map_bam)
+            para_fq = para_fq + ' -q'
+
+        # file exists
+        if os.path.exists(map_bam) and args['overwrite'] is False:
+            logging.info('bam file exists: %s' % map_bam)
+        else:
+            c1 = '%s %s -p %s --very-sensitive-local --mm --no-unal --un %s -x %s -U %s' % (bowtie2_exe, 
+                para_fq, args['threads'], unmap, index, fq)
+            # c1 = '%s --very-sensitive-local --mm --no-unal -p %s --un %s -x %s -U %s' % (bowtie2_exe, 
+            #     args['threads'], unmap, index, fq)
+            c2 = 'samtools view -bhS -F 0x4 -@ %s %s -' % (args['threads'], para_unique)
+            c3 = 'samtools sort -@ %s -o %s -' % (args['threads'], map_bam)
             with open(map_log, 'wt') as ff:
-                p1 = subprocess.Popen(shlex.split(c1), stdout=subprocess.PIPE, 
+                p1 = subprocess.Popen(shlex.split(c1), stdout=subprocess.PIPE,
                                       stderr=ff)
-                p2 = subprocess.Popen(shlex.split(c2), stdin=p1.stdout, 
+                p2 = subprocess.Popen(shlex.split(c2), stdin=p1.stdout,
                                       stdout=subprocess.PIPE)
                 p3 = subprocess.Popen(shlex.split(c3), stdin=p2.stdout)
                 px = p3.communicate()
 
         # process log file
         self.wrap_log(map_log)
-        return [map_bam, unmap_fq]
+        return [map_bam, unmap]    
 
 
-
-    def star_se(self, fq, idx, fq_path=None):
-        """Run STAR, default kwargs"""
-        assert os.path.exists(fq)
-        assert isinstance(idx, str)
+    def star_se(self, fq, index, reference, unique_map=False, align_path=None):
+        """Run STAR, default kwargs
+        
+        args['unique_only'] is TRUE, unique_map=True:
+        """
         args = self.args
-        prefix, map_bam, map_bed, map_log, unmap_fq = self.init_dir(fq, idx, fq_path)
+        star_exe = which('STAR')
+        if not align_path:
+            align_path = args['path_out']
 
+        # output directory
+        prefix, map_bam, map_log, unmap, reference = self._path_init(fq, index, 
+            reference, align_path)
+        
+        # determine parameters
         n_map = args['n_map']
-        if args['unique_only'] is True:
-            n_map = 1
+        if n_map > 1:
+            n_map = n_map # n_map default: 0
         else:
-            n_map = 20 if n_map == 0 else n_map
-        para_star = '--outFilterMultimapNmax %s' % n_map
+            n_map = 10 # STAR default: 10
+        para_unique = '--outFilterMultimapNmax %s' % n_map
 
-        # if args['unique_only'] is True:
-        #     para_star = '--outFilterMismatchNoverLmax 0.07 --outFilterMultimapNmax 1'
-
-        freader = 'zcat' if is_gz(fq) else '-'
-        map_prefix = os.path.splitext(map_bam)[0]
-
+        fr = 'zcat' if is_gz(fq) else '-'
+        # file exists
+        map_prefix = os.path.join(align_path, prefix)
         if os.path.exists(map_bam) and args['overwrite'] is False:
-            logging.info('file exists, alignemnt skipped: %s' % map_bam)
+            logging.info('bam file exists: %s' % map_bam)
         else:
             c1 = 'STAR --runMode alignReads \
               --genomeDir %s \
@@ -279,136 +292,248 @@ class Alignment(object):
               --outFileNamePrefix %s \
               --runThreadN %s \
               --limitOutSAMoneReadBytes 1000000 \
-              --genomeLoad LoadAndRemove \
+              --genomeLoad LoadAndKeep \
               --limitBAMsortRAM 10000000000 \
               --outSAMtype BAM SortedByCoordinate \
               --outFilterMismatchNoverLmax 0.07 \
               --seedSearchStartLmax 20 \
-              --outReadsUnmapped Fastx %s' % (idx, fq, freader, map_prefix,
-                                              args['multi_cores'], para_star)
+              --outReadsUnmapped Fastx %s %s' % (index, fq, fr, map_prefix, 
+                args['threads'], unmap, para_unique)
             p1 = subprocess.run(shlex.split(c1))
-            # rename exists file
-            # sort bam files
-            pysam.sort('-o', map_bam, 
-                '-@', str(args['multi_cores']),
-                map_prefix + 'Aligned.sortedByCoord.out.bam')
-            # os.rename(map_prefix + 'Aligned.sortedByCoord.out.bam', map_bam)
-            os.rename(map_prefix + 'Unmapped.out.mate1', unmap_fq)
-            os.rename(map_prefix + 'Log.final.out', map_log)
             
+            # filter unique mapped reads
+            if unique_map: # only unique mapped reads, -q 10
+                pysam.view('-bhS', '-q', '10', '-@', str(args['threads']),
+                    '-o', map_bam, map_prefix + 'Aligned.sortedByCoord.out.bam',
+                    catch_stdout=False)
+            else:
+                os.rename(map_prefix + 'Aligned.sortedByCoord.out.bam', map_bam)
+            os.rename(map_prefix + 'Unmapped.out.mate1', unmap)
+            os.rename(map_prefix + 'Log.final.out', map_log)
+
         # process log file
         self.wrap_log(map_log)
-        return [map_bam, unmap_fq]
+        return [map_bam, unmap]
 
 
-
-    def align_se_batch(self, fq, idxes, fq_path=None):
-        """Run alignment in batch mode, for multiple genome indexes
-        one fastq file to mulitple indexes
+    def align_se_batch(self, fq, align_path=None):
+        """Align reads to multiple indexes in specific order,
+        return align.stat, map_bam, unmap_reads
+        determine the index order
+        return bam_files
         """
-        assert os.path.exists(fq)
-        assert isinstance(idxes, list)
         args = self.args
-        if fq_path is None:
-            fq_path = args['path_out']
 
-        # choose aligner
-        if args['aligner'].lower() == 'star':
-            align_se = self.star_se
-        elif args['aligner'].lower() == 'bowtie2':
-            align_se = self.bowtie2_se
-        elif args['aligner'].lower() == 'bowtie':
-            align_se = self.bowtie_se
-        else:
+        if not align_path:
+            align_path = args['path_out']
+
+        # define aligner
+        aligner_dict = {
+            'bowtie': self.bowtie_se,
+            'bowtie2': self.bowtie2_se,
+            'STAR': self.star_se}
+
+        aligner_exe = aligner_dict.get(args['aligner'], None) # determine aligner
+        if not aligner_exe:
             raise ValueError('unknown aligner: %s' % args['aligner'])
 
-        # iterate indexes
+        # get all index in order
+        index_dict = self._index_list() # genome_rRNA, genome, sp_rRNA, sp
         bam_files = []
         fq_input = fq
-        for idx in idxes:
-            bam_map, fq_unmap = align_se(fq_input, idx, fq_path)
-            fq_input = fq_unmap
-            bam_files.append(bam_map)
 
-        # output
+        # 1. genome_rRNA (rRNA: both unique, multiple)
+        idx1 = index_dict['genome_rRNA']
+        reference = self.genome + '_rRNA'
+        bam_idx1, unmap_idx1 = aligner_exe(fq=fq_input, index=idx1, 
+            reference=reference, unique_map=False, 
+            align_path=align_path)
+        fq_input = unmap_idx1
+
+        # 2. genome
+        idx2 = index_dict['genome']
+        reference = self.genome
+        bam_idx2, unmap_idx2 = aligner_exe(fq=fq_input, index=idx2, 
+            reference=reference, unique_map=args['unique_only'], 
+            align_path=align_path)
+        fq_input = unmap_idx2
+
+        if args['spikein']: # add spikein
+            # 3. sp_rRNA  (rRNA: both unique, multiple)
+            idx3 = index_dict['sp_rRNA']
+            reference = args['spikein'] + '_rRNA'
+            bam_idx3, unmap_idx3 = aligner_exe(fq=fq_input, index=idx3, 
+                reference=reference, unique_map=False,
+                align_path=align_path)
+            fq_input = unmap_idx3
+
+            # 4. sp (optional)
+            idx4 = index_dict['sp']
+            reference = args['spikein']
+            bam_idx4, unmap_idx4 = aligner_exe(fq=fq_input, index=idx4, 
+                reference=reference, unique_map=args['unique_only'],
+                align_path=align_path)
+            fq_input = unmap_idx4
+
+            bam_files = [bam_idx1, bam_idx2, bam_idx3, bam_idx4]
+        else: # no spikein
+            bam_idx3 = bam_idx4 = None
+
+        bam_files = [bam_idx1, bam_idx2, bam_idx3, bam_idx4]
+        bam_files = list(filter(partial(is_not, None), bam_files)) # remove None
+
         return bam_files
 
 
+    def align_extra(self, fq, align_path=None):
+        """Align reads to extra index
+        such as GFP, white, firefly, transposon
+        return bam_files
+        """
+        args = self.args
+
+        if not align_path:
+            align_path = args['path_out']
+
+        # define aligner
+        aligner_dict = {
+            'bowtie': self.bowtie_se,
+            'bowtie2': self.bowtie2_se,
+            'STAR': self.star_se}
+
+        aligner_exe = aligner_dict.get(args['aligner'], None) # determine aligner
+        if not aligner_exe:
+            raise ValueError('unknown aligner: %s' % args['aligner'])
+
+        # get all index in order
+        index_ext = args['index_ext']
+
+        if index_validator(index_ext, args['aligner']):
+            reference = os.path.basename(index_ext)
+            bam_ext, unmap_ext = aligner_exe(fq=fq, 
+                index=index_ext, reference=reference, unique_map=True, 
+                align_path=align_path)
+        else:
+            bam_ext = None
+        return [bam_ext]
+
+
+    def run_extra(self):
+        """Run the alignment for specific fastq file onto extra index
+        1. run alignment for each replicate
+        2. merge replicates
+        3. run log parser, in json format
+        4. organize the log files, saved in one report, including the following groups:
+        """
+        args = self.args
+
+        bam_out = []
+
+        # run alignment for replicates
+        for fq in args['fqs']:
+            logging.info('alignment: %s' % fq)
+            fq_prefix = file_prefix(fq)[0]
+            fq_prefix = re.sub('\.clean|\.nodup|\.cut', '', fq_prefix)
+            fq_path = os.path.join(args['path_out'], 'extra_mapping', fq_prefix)
+            assert is_path(fq_path)
+            logging.info('align to index_ext: %s' % fq_prefix)
+            bam_files = self.align_extra(fq, fq_path)
+            bam_out.append(bam_files) #
+            # stat alignment
+            Alignment_stat(fq_path).saveas()
+
+
+        # merge bam files
+        if args['merge_rep']: 
+            merged_path = os.path.join(args['path_out'], 'extra_mapping', args['smp_name'])
+            merged_files = []
+            if len(bam_out) > 1: # for multiple bam files
+                assert is_path(merged_path)
+                for i in range(len(bam_out[0])):
+                    rep_bam_files = [b[i] for b in bam_out]
+                    merged_suffix = str_common(rep_bam_files, suffix=True)
+                    merged_suffix = re.sub('^_[12]|_R[12]', '', merged_suffix)
+                    merged_bam_name = args['smp_name'] + merged_suffix
+                    merged_bam_file =  os.path.join(merged_path, merged_bam_name)
+                    if os.path.exists(merged_bam_file) and args['overwrite'] is False:
+                        logging.info('file exists: %s' % merged_bam_file)
+                    else:
+                        tmp = bam_merge(rep_bam_files, merged_bam_file)
+                    merged_files.append(merged_bam_file)
+                Alignment_stat(merged_path).saveas()
+                bam_out.append(merged_files)
+
+        return bam_out
+
 
     def run(self):
-        """Run alignments"""
+        """Run the alignment for specific fastq file
+        1. run alignment for each replicate
+        2. merge replicates
+        3. run log parser, in json format
+        4. organize the log files, saved in one report, including the following groups:
+        genome_rRNA, genome_unique, genome_multi, sp_rRNA, sp_unique, sp_multi, unmap
+        """
         args = self.args
-        fqs = args['fqs']
-        
-        # check indexes
-        if args['index_ext'] is None:
-            idxes = self.get_align_index()
-        else:
-            idxes = args['index_ext']
-            idxes_flag = [is_idx(f, args['aligner']) for f in idxes]
-            if all(idxes_flag) is False:
-                logging.error('%10s | -x option error' % 'failed')
-                logging.error('%10s : %s' % ('Aligner', args['aligner']))
-                logging.error('%10s : %s' % ('index', idxes))
-                sys.exit(1)
 
-        # run alignment
-        out_bam_files = []
-        for fq in fqs:
-            logging.info('mapping: %s ' % fq)
+        bam_out = []
+
+        # run alignment for replicates
+        for fq in args['fqs']:
+            logging.info('alignment: %s' % fq)
             fq_prefix = file_prefix(fq)[0]
             fq_prefix = re.sub('\.clean|\.nodup|\.cut', '', fq_prefix)
             fq_path = os.path.join(args['path_out'], fq_prefix)
-            bam_files = self.align_se_batch(fq, idxes, fq_path)
-            out_bam_files.append(bam_files) # bam files
-            # rep path
-            bam_path_out = os.path.dirname(bam_files[0])
-            Alignment_stat(bam_path_out).saveas()
+            assert is_path(fq_path)
+            bam_files = self.align_se_batch(fq, fq_path)
+            bam_out.append(bam_files) # 
+            # stat alignment
+            Alignment_stat(fq_path).saveas()
 
         # merge bam files
-        merged_path_out = os.path.join(args['path_out'], args['smp_name'])
-        merged_bam_files = [] # map to multiple indexes
-        if len(out_bam_files) > 1: #
-            assert is_path(merged_path_out)
-            for i in range(len(out_bam_files[0])): # 
-                se_bam_files = [b[i] for b in out_bam_files]
-                merged_suffix = str_common(se_bam_files, suffix=True)
-                merged_suffix = re.sub('^_[12]|_R[12]', '', merged_suffix)
-                merged_bam_name = args['smp_name'] + merged_suffix
-                merged_bam_file = os.path.join(merged_path_out, merged_bam_name)
-                merged_bed_file = re.sub('.bam$', '.bed', merged_bam_file)
-                if os.path.exists(merged_bam_file) and args['overwrite'] is False:
-                    logging.info('file exists: %s' % merged_bam_name)
-                else:
-                    tmp = bam_merge(se_bam_files, merged_bam_file)
-                    pybedtools.BedTool(merged_bam_file).bam_to_bed().saveas(merged_bed_file)
-                merged_bam_files.append(merged_bam_file)
-            # merge_map_wrapper(path_out_merge)
-            Alignment_stat(merged_path_out).saveas()
+        if args['merge_rep']: 
+            merged_path = os.path.join(args['path_out'], args['smp_name'])
+            merged_files = []
+            if len(bam_out) > 1: # for multiple bam files
+                assert is_path(merged_path)
+                for i in range(len(bam_out[0])):
+                    rep_bam_files = [b[i] for b in bam_out]
+                    merged_suffix = str_common(rep_bam_files, suffix=True)
+                    merged_suffix = re.sub('^_[12]|_R[12]', '', merged_suffix)
+                    merged_bam_name = args['smp_name'] + merged_suffix
+                    merged_bam_file =  os.path.join(merged_path, merged_bam_name)
+                    if os.path.exists(merged_bam_file) and args['overwrite'] is False:
+                        logging.info('file exists: %s' % merged_bam_file)
+                    else:
+                        tmp = bam_merge(rep_bam_files, merged_bam_file)
+                    merged_files.append(merged_bam_file)
+                Alignment_stat(merged_path).saveas()
+                bam_out.append(merged_files)
 
-            out_bam_files.append(merged_bam_files)
-
-        # create short names for each genome bam
-        genome_bam_files = [f[-1] for f in out_bam_files] # last one
-        genome_bed_files = []
-        for bam_from in genome_bam_files:
+        # make short names for genome bam files
+        genome_bam_files = []
+        for b in bam_out: # nested array
+            bam_from = b[1]
             bam_to = os.path.join(os.path.dirname(bam_from),
-                                  filename_shorter(bam_from))
+                filename_shorter(bam_from))
             if not os.path.exists(bam_to):
                 os.symlink(os.path.basename(bam_from), bam_to)
             if not os.path.exists(bam_to + '.bai'):
                 if not os.path.exists(bam_from + '.bai'):
-                    pysam.index(bam_from)
-                os.symlink(os.path.basename(bam_from) + '.bai',
-                           bam_to + '.bai')
-            # rename *.bed
-            bed_from = os.path.splitext(bam_from)[0] + '.bed'
-            bed_to = os.path.splitext(bam_to)[0] + '.bed'
-            if os.path.exists(bed_from) and not os.path.exists(bed_to):
-                os.symlink(os.path.basename(bed_from), bed_to)
-            genome_bed_files.append(bed_to)
-        return genome_bam_files
+                    if os.path.getsize(bam_from) < 1000: # !!!! empty bam files
+                        continue
+                    else:
+                        pysam.index(bam_from) # empty bam
+                os.symlink(os.path.basename(bam_from) + '.bai', bam_to + '.bai')
+            genome_bam_files.append(bam_to)
 
+
+        # run extra index mapping
+        ext_bam_files = None
+        if not args['index_ext'] is None and index_validator(args['index_ext'], args['aligner']):
+            ext_bam_files = self.run_extra()
+
+        return [genome_bam_files, ext_bam_files]
 
 
 class Alignment_log(object):
@@ -478,7 +603,6 @@ class Alignment_log(object):
                             % of chimeric reads |       0.00%
     """
 
-
     def __init__(self, log, unique_only=False):
         self.log = log
         self.unique_only = unique_only
@@ -487,23 +611,36 @@ class Alignment_log(object):
             self.stat = log.stat
         elif isinstance(log, dict):
             self.stat = log
-        elif isinstance(log, io.TextIOWrapper):
-            self.stat = self._log_parser()
         elif os.path.isfile(log):
             self.stat = self._log_parser()
         else:
-            raise ValueError('not supported file')
+            raise ValueError('not supported file: %s' % log)
 
 
-
-    def _is_file(self):
-        """Check the log file is exists, not empty
+    def guess_aligner(self):
+        """Guess the aligner of the log file:
+        bowtie, bowtie2, STAR, ...
         """
-        if os.path.isfile(self.log):
-            return True
-        else:
-            return False
+        # read through log file
+        log_lines = []
+        with open(self.log, 'rt') as ff:
+            for r in ff:
+                if r.startswith('Warning'):
+                    continue
+                log_lines.append(r.strip())
 
+        # parsing log file
+        line = log_lines[0] # the first line
+        if line.startswith('#'):
+            log_parser = self._bowtie_parser
+        elif 'reads; of these' in line:
+            log_parser = self._bowtie2_parser
+        elif '|' in line:
+            log_parser = self._star_parser
+        else:
+            raise ValueError('unknown file format: %s' % self.log)
+            pass
+        return log_parser
 
 
     def _is_non_empty(self):
@@ -514,9 +651,10 @@ class Alignment_log(object):
             return False
 
 
-
-    def _bowtie_log(self):
-        """Wrapper bowtie log"""
+    def _bowtie_parser(self):
+        """Wrapper bowtie log
+        unique, multiple, unmap, map, total
+        """
         dd = {}
         with open(self.log, 'rt') as ff:
             for line in ff:
@@ -537,17 +675,16 @@ class Alignment_log(object):
                     pass
         # unique_only
         dd['unique'] = dd['map']
-        dd['multiple'] = 0 #no multiple
-        # if self.unique_only is True or 'multiple' in dd:
-        #     pass
-        # else:
-        #     dd['multiple'] = 0
-        dd['unmap'] = dd['total'] - dd['map']
+        dd['multiple'] = dd.get('multiple', 0) # default 0
+        if self.unique_only:
+            dd['map'] = dd['unique']
+        else:
+            dd['map'] = dd['unique'] + dd['multiple']
+        dd['unmap'] = dd['total'] - dd['unique'] - dd['multiple']
         return dd
 
 
-
-    def _bowtie2_log(self):
+    def _bowtie2_parser(self):
         """Wrapper bowtie2 log"""
         dd = {}
         with open(self.log, 'rt') as ff:
@@ -566,19 +703,16 @@ class Alignment_log(object):
                     dd['multiple'] = value
                 else:
                     pass
-        if self.unique_only is True:
+        if self.unique_only:
             dd['map'] = dd['unique']
-            # dd['multiple'] = 0
         else:
-            # unique and multiple
             dd['map'] = dd['unique'] + dd['multiple']
-        dd['unmap'] = dd['total'] - dd['map']
+        dd['unmap'] = dd['total'] - dd['unique'] - dd['multiple']
         return dd
 
 
-
-    def _star_log(self):
-        """Wrapper STAR *Final.log"""
+    def _star_parser(self):
+        """Wrapper STAR *final.log"""
         dd = {}
         with open(self.log, 'rt') as ff:
             for line in ff:
@@ -596,11 +730,9 @@ class Alignment_log(object):
                     pass
         if self.unique_only is True:
             dd['map'] = dd['unique']
-            # dd['multiple'] = 0
         else:
-            # unique and multiple
             dd['map'] = dd['unique'] + dd['multiple']
-        dd['unmap'] = dd['total'] - dd['map']
+        dd['unmap'] = dd['total'] - dd['unique'] - dd['multiple']
         return dd
 
 
@@ -613,39 +745,12 @@ class Alignment_log(object):
 
         extra trimming
         1. trim "(10.00%)" 
-        2. trim "blank" at both tails
+        2. trim "blank" at both ends
         """
         log = self.log
-        log_lines = []
-        if isinstance(log, dict):
-            return Alignment_log(log)
-        elif isinstance(log, io.TextIOWrapper):
-            for r in log:
-                if r.startswith('Warning'): # skip warnings
-                    continue
-                log_lines.append(r.strip())
-        elif os.path.exists(log):
-            with open(self.log, 'rt') as ff:
-                for r in ff:
-                    if r.startswith('Warning'):
-                        continue
-                    log_lines.append(r.strip())
-        else:
-            raise ValueError('unknown file format')
-        
-        # parsing log file
-        line = log_lines[0] # the first line
-        if line.startswith('#'):
-            dd = self._bowtie_log()
-        elif 'reads; of these' in line:
-            dd = self._bowtie2_log()
-        elif '|' in line:
-            dd = self._star_log()
-        else:
-            raise ValueError('unknown file format')
-
+        log_parser = self.guess_aligner()
+        dd = log_parser()
         return dd
-
 
 
     def _tmp(self):
@@ -654,7 +759,6 @@ class Alignment_log(object):
                                             suffix='.json',
                                             delete=False)
         return tmpfn.name
-
 
 
     def saveas(self, _out=None):
@@ -667,16 +771,14 @@ class Alignment_log(object):
         dd = self.stat
 
         with open(_out, 'wt') as fo:
-            json.dump(dd, fo, indent=4, sort_keys=True)
+            json.dump(dd, fo, indent=4, sort_keys=False)
 
         return _out
-
 
 
 class Alignment_stat(object):
     """Parse mapping reads in directory
     1. for each rep bam, parse json files, 
-    del. 2. merged bam files, count bam lines
     2. merge replicates
     """
     def __init__(self, path):
@@ -687,18 +789,18 @@ class Alignment_stat(object):
         elif isinstance(path, pd.DataFrame):
             self.stat = path
         elif os.path.isdir(path):
-            json_files = self._list_files('.json')
-            bam_files = self._list_bam_files()
-            if not json_files is None:
-                self.stat = self.align_log_stat()
-            elif not bam_files is None:
-                # self.stat = self.bam_stat()
-                self.stat = self.merge_rep_stat()
+            json_files = self.json_files()
+            bam_files = self.bam_files()
+            if len(json_files) == 1:
+                self.stat = self.single_stat()
+            elif json_files:
+                self.stat = self.rep_stat()
+            elif bam_files:
+                self.stat = self.merge_stat()
             else:
                 raise ValueError('BAM or json files not found: %s' % path)
         else:
             raise ValueError('unknown format')
-
 
 
     def _is_non_empty(self, fn):
@@ -709,151 +811,151 @@ class Alignment_stat(object):
             return False
 
 
-
-    def _list_files(self, suffix='*'):
-        """List json files in mapping directory"""
-        path = self.path
-        json_files = [os.path.join(path, f) for f in os.listdir(path) 
-            if f.endswith(suffix)]
-        json_files = [f for f in json_files if self._is_non_empty(f) is True]
-        if len(json_files) > 0:
-            return json_files
-        else:
-            return None
+    def findfiles(self, which, where='.'):
+        """Returns list of filenames from `where` path matched by 'which'
+        shell pattern. Matching is case-insensitive.
+        # findfiles('*.ogg')
+        """    
+        # TODO: recursive param with walk() filtering
+        rule = re.compile(fnmatch.translate(which), re.IGNORECASE)
+        hits = [os.path.join(where, name) for name in os.listdir(where) if rule.match(name)]
+        return hits
 
 
+    def json_files(self):
+        """Return all json files in path"""
+        j = self.findfiles('*.json', self.path)
+        j = [i for i in j if self._is_non_empty(i)] # exclude empty json
+        if len(j) == 0:
+            j = None
+        return j
 
-    def _json_log_reader(self, fn):
+
+    def bam_files(self):
+        """Return all BAM files in path
+        skip symlink
+        # directory of merged fastq, count bam file
+        # to-do: summary replicates (except unmap)
+        """
+        bam_files = self.findfiles('*.bam', self.path)
+        bam_files = [b for b in bam_files if self._is_non_empty(b) and not os.path.islink(b)]
+        if len(bam_files) == 0:
+            bam_files = None
+        return bam_files
+
+
+    def _json_log_reader(self, fn, to_dataframe=True):
         """Parse json file, save as DataFrame"""
-        # fn_name = os.path.splitext(os.path.basename(fn))[0]
+        if fn is None:
+            return None
         fn_name = os.path.basename(fn)
-        group, aligner = fn.split('.')[-3:-1]
+        group, aligner = fn.split('.')[-3:-1] # 
         group = re.sub('^map_', '', group)
         dd = Json_file(fn).stat # dict of count
-        # total, unique, multiple, unmap
-        df = pd.DataFrame(data=[list(dd.values())], columns=list(dd.keys()))
-        df.pop('map') # drop "map" column
-        df.index = [fn_name]
+        rpt = dd
+        if to_dataframe:
+            # total, unique, multiple, unmap
+            df = pd.DataFrame(data=[list(dd.values())], columns=list(dd.keys()))
+            df.pop('map') # drop "map" column
+            df.index = [fn_name]
+            rpt = df
+        return rpt
+
+
+    def single_stat(self):
+        """Extract alignment log files in index_ext directory"""
+        path = self.path.rstrip('/')
+        json_files = self.json_files()
+        json_files = sorted(json_files, key=len)
+        prefix = os.path.basename(self.path)
+        dd = self._json_log_reader(json_files[0], False)
+        df = pd.DataFrame(dd, index=[prefix])
         return df
 
 
-
-    # directory of replicate fastq file contains *.json file
-    def align_log_stat(self):
-        """Extract alignment log from one directory"""
-        path = self.path.rstrip('/')
-        json_files = self._list_files('.json')
-
-        if len(json_files) == 0:
-            return None
-        elif len(json_files) == 1:
-            # map_genome
-            df = self._json_log_reader(json_files[0])
-            return df
-        else:
-            json_files = sorted(json_files, key=len)
-            # map to genome
-            dfg = self._json_log_reader(json_files[-1])
-            dfg = dfg.loc[:, ['unique', 'multiple', 'unmap']]
-
-            # map to others
-            frames = []
-            for json_file in json_files[:-1]:
-                df = self._json_log_reader(json_file)
-                log_name = df.index.tolist()[0] # first one
-                group = log_name.split('.')[-3] # map_group
-                group = re.sub('map_', '', group)
-                df = df.assign(mapped=df.unique + df.multiple)
-                # df.columns.values[-1] = group # rename column
-                #df_group = df.loc[:, group]
-                df_group = df.iloc[:, -1]
-                df_group = pd.DataFrame({'g': df_group})
-                df_group.columns = [group]
-                df_group.index = [os.path.basename(path)]
-                frames.append(df_group)
-            # all rows
-            dfx = pd.concat(frames, sort=False, axis=1) #, axis=1, sort=True, ignore_index=True)
-            dfx.index = list(dfg.index.values)
-
-            # all stat
-            df = pd.concat([dfx, dfg], axis=1)
-            df = df.assign(total=pd.Series(df.sum(axis=1)).values)
-
-            # index
-            df.index = [os.path.basename(path)]
-            return df
-
-
-
-    # directory of merged fastq, count bam file
-    # to-do: summary replicates (except unmap)
-    def _list_bam_files(self):
-        """Skip sym-link file"""
-        path = self.path
-        bam_files = [b for b in sorted(self._list_files('.bam'), key=len) 
-            if self._is_non_empty(b) and not os.path.islink(b)]
-        if len(bam_files) > 0:
-            return bam_files
-        else:
-            return None
-
-
-
-    # def bam_stat(self):
-    #     path = self.path
-    #     prefix = os.path.basename(path)
-    #     bam_files = self._list_bam_files()
-        
-    #     frames = []
-    #     for bam in bam_files:
-    #         bam_count = pysam.AlignmentFile(bam, 'rb').count()
-    #         group = bam.split('.')[-2] # map_group
-    #         group = re.sub('map_', '', group)
-    #         if len(bam_files) > 1 and bam_files.index(bam) == 0 and group == 'genome':
-    #             group = 'spikein'
-    #         df = pd.DataFrame({'data': bam_count}, index=[prefix])
-    #         df.columns = [group]
-    #         frames.append(df)
-    #     # merge
-    #     df_all = pd.concat(frames, axis=1)
-    #     return df_all
-
-
-
-    def merge_rep_stat(self):
-        """Stat reads for merged sample
-        combine stat of replicates
-        search the parent_directory of merged_dir
+    def rep_stat(self):
+        """Extract alignment log files in directory
         """
         path = self.path.rstrip('/')
-        parent_path = os.path.dirname(path)
-        rep_dirs = [os.path.join(parent_path, f) for f in os.listdir(parent_path)]
-        rep_dirs = [f for f in rep_dirs if os.path.isdir(f)]
+        json_files = self.json_files()
+        json_files = sorted(json_files, key=len)
+        prefix = os.path.basename(self.path)
+        # genome_rRNA, genome, sp_rRNA, sp, unmap, map, total
+        if len(json_files) == 2 or len(json_files) == 4:
+            pass
+        else:
+            raise ValueError('number of json files should be; 2|4, [%d]' % len(json_files))
 
-        frames = []
-        for rep_dir in rep_dirs:
-            json_files = [os.path.join(rep_dir, f) for f in os.listdir(rep_dir)
-                if f.endswith('.json')]
-            if len(json_files) > 0:
-                frames.append(Alignment_stat(rep_dir).stat)
-            else:
-                continue # next
+        # genome
+        # map rRNA, genome, spikein_rRNA, spikein
+        json_genome_rRNA, json_genome = json_files[:2]
+        json_sp_rRNA = json_sp = None
+        if len(json_files) == 4:
+            json_sp_rRNA, json_sp = json_files[2:]
+        df1 = self._json_log_reader(json_genome_rRNA, False)
+        df2 = self._json_log_reader(json_genome, False)
+        df3 = self._json_log_reader(json_sp_rRNA, False)
+        df4 = self._json_log_reader(json_sp, False)
+
+        # genome
+        n_total = df1['total']
+        g_rRNA = df1['unique'] + df1['multiple']
+        g_unique = df2['unique']
+        g_multi = df2['multiple']
+        n_unmap = df2['unmap']
+
+        # spikein rRNA
+        if isinstance(df3, dict):
+            sp_rRNA = df3['unique'] + df3['multiple']
+        else:
+            sp_rRNA = 0
+
+        # spikein
+        if isinstance(df4, dict):
+            sp_unique = df4['unique']
+            sp_multi = df4['multiple']
+            n_unmap = df4['unmap']
+        else:
+            sp_unique = sp_multi = 0
+
         # output
-        if len(frames) > 0:
-            # rep
+        data = {
+            'genome_rRNA': g_rRNA,
+            'genome_unique': g_unique,
+            'genome_multiple': g_multi,
+            'spikein_rRNA': sp_rRNA,
+            'spikein_unique': sp_unique,
+            'spikein_multi': sp_multi,
+            'unmap': n_unmap,
+            'total': n_total}
+        df = pd.DataFrame(data, index=[prefix])
+
+        # return
+        return df
+
+
+    def merge_stat(self):
+        """Stat reads for merged sample
+        combine all reads in each replicates
+        no json files detedted in merged directory
+        search *.csv files in up-level directory
+        """
+        merge_path_name = os.path.basename(self.path.rstrip('/'))
+        parent_path = os.path.dirname(self.path.rstrip('/')) # 
+        rep_path = [i for i in os.listdir(parent_path) if not i == merge_path_name]
+        rep_csv_files = [os.path.join(parent_path, i + '.mapping_stat.csv') for i in rep_path]
+        rep_csv_files = [f for f in rep_csv_files if os.path.isfile(f)]
+
+        if len(rep_csv_files) > 0:
+            frames = [pd.read_csv(i, '\t', index_col=0) for i in rep_csv_files]
             df = pd.concat(frames, axis=0)
-            rep_names = list(df.index.values)
-            rep_suffix = str_common(rep_names, suffix=True)
-            df.index = [f.rstrip(rep_suffix) for f in rep_names]
             # merge
-            df_merge = pd.DataFrame(data=[df.sum(axis=0)], columns=list(df.columns.values))
-            df_merge.index = [os.path.basename(path)]
-            # return pd.concat([df, df_merge], axis=0)
+            df_merge = pd.DataFrame(data=[df.sum(axis=0)], columns=list(df.columns.values),
+                index=[merge_path_name])
             return df_merge
         else:
             logging.error('%10s | not contain mapping files: %s' % ('failed', path))
             return None
-
 
 
     def saveas(self, _out=None):
@@ -864,16 +966,7 @@ class Alignment_stat(object):
             _out = os.path.join(os.path.dirname(path),
                                 prefix + '.mapping_stat.csv')
         df = self.stat
-        df = df.reset_index()
-
-        default_kwargs = dict(sep='\t', header=True, index=False)
-        if isinstance(_out, io.TextIOWrapper):
-            print(df.to_string(index=False, header=False, justify='left'))
-        else:
-            df.to_csv(_out, **default_kwargs)
+        df.to_csv(_out, sep='\t', header=True, index=True)
         
         return _out
 
-
-
-## EOF
