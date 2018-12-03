@@ -385,6 +385,87 @@ class Alignment(object):
         return bam_files
 
 
+    def align_extra(self, fq, align_path=None):
+        """Align reads to extra index
+        such as GFP, white, firefly, transposon
+        return bam_files
+        """
+        args = self.args
+
+        if not align_path:
+            align_path = args['path_out']
+
+        # define aligner
+        aligner_dict = {
+            'bowtie': self.bowtie_se,
+            'bowtie2': self.bowtie2_se,
+            'STAR': self.star_se}
+
+        aligner_exe = aligner_dict.get(args['aligner'], None) # determine aligner
+        if not aligner_exe:
+            raise ValueError('unknown aligner: %s' % args['aligner'])
+
+        # get all index in order
+        index_ext = args['index_ext']
+
+        if index_validator(index_ext, args['aligner']):
+            reference = os.path.basename(index_ext)
+            bam_ext, unmap_ext = aligner_exe(fq=fq, 
+                index=index_ext, reference=reference, unique_map=True, 
+                align_path=align_path)
+        else:
+            bam_ext = None
+        return [bam_ext]
+
+
+    def run_extra(self):
+        """Run the alignment for specific fastq file onto extra index
+        1. run alignment for each replicate
+        2. merge replicates
+        3. run log parser, in json format
+        4. organize the log files, saved in one report, including the following groups:
+        """
+        args = self.args
+
+        bam_out = []
+
+        # run alignment for replicates
+        for fq in args['fqs']:
+            logging.info('alignment: %s' % fq)
+            fq_prefix = file_prefix(fq)[0]
+            fq_prefix = re.sub('\.clean|\.nodup|\.cut', '', fq_prefix)
+            fq_path = os.path.join(args['path_out'], 'extra_mapping', fq_prefix)
+            assert is_path(fq_path)
+            logging.info('align to index_ext: %s' % fq_prefix)
+            bam_files = self.align_extra(fq, fq_path)
+            bam_out.append(bam_files) #
+            # stat alignment
+            Alignment_stat(fq_path).saveas()
+
+
+        # merge bam files
+        if args['merge_rep']: 
+            merged_path = os.path.join(args['path_out'], 'extra_mapping', args['smp_name'])
+            merged_files = []
+            if len(bam_out) > 1: # for multiple bam files
+                assert is_path(merged_path)
+                for i in range(len(bam_out[0])):
+                    rep_bam_files = [b[i] for b in bam_out]
+                    merged_suffix = str_common(rep_bam_files, suffix=True)
+                    merged_suffix = re.sub('^_[12]|_R[12]', '', merged_suffix)
+                    merged_bam_name = args['smp_name'] + merged_suffix
+                    merged_bam_file =  os.path.join(merged_path, merged_bam_name)
+                    if os.path.exists(merged_bam_file) and args['overwrite'] is False:
+                        logging.info('file exists: %s' % merged_bam_file)
+                    else:
+                        tmp = bam_merge(rep_bam_files, merged_bam_file)
+                    merged_files.append(merged_bam_file)
+                Alignment_stat(merged_path).saveas()
+                bam_out.append(merged_files)
+
+        return bam_out
+
+
     def run(self):
         """Run the alignment for specific fastq file
         1. run alignment for each replicate
@@ -396,6 +477,7 @@ class Alignment(object):
         args = self.args
 
         bam_out = []
+
         # run alignment for replicates
         for fq in args['fqs']:
             logging.info('alignment: %s' % fq)
@@ -445,7 +527,13 @@ class Alignment(object):
                 os.symlink(os.path.basename(bam_from) + '.bai', bam_to + '.bai')
             genome_bam_files.append(bam_to)
 
-        return genome_bam_files
+
+        # run extra index mapping
+        ext_bam_files = None
+        if not args['index_ext'] is None and index_validator(args['index_ext'], args['aligner']):
+            ext_bam_files = self.run_extra()
+
+        return [genome_bam_files, ext_bam_files]
 
 
 class Alignment_log(object):
@@ -703,7 +791,9 @@ class Alignment_stat(object):
         elif os.path.isdir(path):
             json_files = self.json_files()
             bam_files = self.bam_files()
-            if json_files:
+            if len(json_files) == 1:
+                self.stat = self.single_stat()
+            elif json_files:
                 self.stat = self.rep_stat()
             elif bam_files:
                 self.stat = self.merge_stat()
@@ -770,6 +860,17 @@ class Alignment_stat(object):
             df.index = [fn_name]
             rpt = df
         return rpt
+
+
+    def single_stat(self):
+        """Extract alignment log files in index_ext directory"""
+        path = self.path.rstrip('/')
+        json_files = self.json_files()
+        json_files = sorted(json_files, key=len)
+        prefix = os.path.basename(self.path)
+        dd = self._json_log_reader(json_files[0], False)
+        df = pd.DataFrame(dd, index=[prefix])
+        return df
 
 
     def rep_stat(self):
