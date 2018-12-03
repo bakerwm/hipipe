@@ -617,6 +617,26 @@ def bed_parser(fn, usecols = None):
 #     c = ((dx['start'] >=  0) & dx['end'] >=  0) & (dx['start'] < dx['end'])
 #     return df.loc[c, :]
 
+def bam2bigwig2(bam, path_out, scale=1, binsize=1, overwrite=False):
+    """Convert BAM to bigWig using deeptools"""
+    bamcoverage_exe = which('bamCoverage')
+    BAM(bam).is_indexed() # check *.bai file
+    is_path(path_out) # create path
+    prefix = os.path.basename(os.path.splitext(bam)[0])
+    bw_out = os.path.join(path_out, prefix + '.bigWig')
+    bw_log = os.path.join(path_out, prefix + '.log')
+    c = '%s --bam %s -o %s --scaleFactor %s --binSize %s' % (bamcoverage_exe, 
+        bam, bw_out, scale, binsize)
+    if os.path.exists(bw_out) and overwrite is False:
+       logging.info('bigWig file exists, %s' % bw_out) 
+    else:
+        with open(bw_log, 'wt') as fo:
+            subprocess.run(shlex.split(c), stdout=fo, stderr=fo)
+        if not os.path.exists(bw_out):
+            raise ValueError('failed to create bigWig file, %s' % bw_out)
+
+
+
 ## utilities
 def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False):
     """Convert bam to bigWig using deeptools
