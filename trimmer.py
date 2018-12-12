@@ -135,7 +135,6 @@ class Trimmer(object):
         return args
 
 
-
     def init_dir(self, fq_in=None):
         """Prepare directory, filename for each file"""
         args = self.args
@@ -151,7 +150,6 @@ class Trimmer(object):
         fq_untrim = os.path.join(args['path_out'], '%s.untrim.fastq' % fq_prefix)
 
         return [fq_prefix, fq_clean, fq_log, fq_untrim]
-
 
 
     def ad_chopper(self, ad=None, step=2, window=15):
@@ -173,7 +171,6 @@ class Trimmer(object):
                     continue
                 p.append(ad[a:b])
         return p
-
 
 
     def wrap_args(self):
@@ -210,7 +207,6 @@ class Trimmer(object):
         return arg_line
 
 
-
     def cutadapt_cut(self, s, cut_para=True):
         """
         recognize para: cut for cutadapt
@@ -234,8 +230,6 @@ class Trimmer(object):
             else:
                 c_para = [int(s), ]
         return c_para
-
-
 
 
     def _is_non_empty(self, fn):
@@ -263,7 +257,6 @@ class Trimmer(object):
         return tmpfn.name
 
 
-
     def saveas(self, _out=None):
         """Save output fastq file"""
         if _out is None:
@@ -275,12 +268,11 @@ class Trimmer(object):
         return _out
 
 
-
     def trim_se(self):
         """Trimming reads using cutadapt"""
         args = self.args
         fq_prefix, fq_clean, fq_log, fq_untrim = self.init_dir()
-        logging.info('trimming adapter: %s' % fq_prefix)
+        logging.info('trimming SE reads: %s' % fq_prefix)
 
         arg_line = self.wrap_args()
         with open(fq_clean, 'wt') as ff, open(fq_log, 'wt') as fg:
@@ -288,6 +280,35 @@ class Trimmer(object):
         Cutadapt_log(fq_log).saveas()
         return fq_clean
 
+
+    def trim_pe(self):
+        """Trimming Paired-end reads using cutadapt
+        example: 
+        cutadapt -a ADAPTER_FWD -A ADAPTER_REV -o out.1.fastq -p out.2.fastq reads.1.fastq reads.2.fastq
+
+        -A  see -a for read1
+        -G  see -g for read1
+        -B  see -b for read1
+        -u  see --cut for read1
+
+        -p  write the second read to FILE
+        --untrimmed-paired-output  write the second read in a pair to this FILE when no
+            adapter was found in the first read. together with --untrimmed-output
+        --too-short-paired-output  write the second read in a pair to this FILE if pair
+            is too short, together with --too-short-output
+        --too-long-paired-output    write the second read in a pair to this FILE if pair
+            is too long, together with --too-long-output
+        """
+        args = self.args
+
+        fq_prefix, fq_clean, fq_log, fq_untrim = self.init_dir()
+        logging.info('trimming PE reads: %s' % fq_prefix)
+
+        arg_line = self.wrap_args()
+        with open(fq_clean, 'wt') as ff, open(fq_log, 'wt') as fg:
+            p1 = subprocess.run(shlex.split(arg_line), stdout=ff, stderr=fg)
+        Cutadapt_log(fq_log).saveas()
+        return fq_clean
 
 
     def rm_duplicate(self, fq_in=None):

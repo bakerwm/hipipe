@@ -984,6 +984,11 @@ class BAM(object):
         pass
 
 
+    def count(self):
+        """Count reads in BAM file"""
+        return pysam.view('-c', self.fn)
+
+
     def to_bed(self, bed=None):
         """Convert BAM to bed using bedtools"""
         bam = self.fn
