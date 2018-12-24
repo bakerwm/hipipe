@@ -59,6 +59,7 @@ class Alignment(object):
         args['n_map'] = args.get('n_map', 0)
         args['aligner'] = args.get('aligner', 'bowtie')
         args['align_to_rRNA'] = args.get('align_to_rRNA', True)
+        args['repeat_masked_genome'] = args.get('repeat_masked_genome', False)
         args['merge_rep'] = args.get('merge_rep', True)
         args['genome_path'] = args.get('genome_path', None)
         args['overwrite'] = args.get('overwrite', False)
@@ -110,11 +111,11 @@ class Alignment(object):
             genome = self.genome
         # check aligner
         if aligner == 'bowtie':
-            index = Genome(genome).bowtie_index(rRNA=rRNA)
+            index = Genome(genome, repeat_masked_genome=args['repeat_masked_genome']).bowtie_index(rRNA=rRNA)
         elif aligner == 'bowtie2':
-            index = Genome(genome).bowtie2_index(rRNA=rRNA)
+            index = Genome(genome, repeat_masked_genome=args['repeat_masked_genome']).bowtie2_index(rRNA=rRNA)
         elif aligner == 'STAR':
-            index = Genome(genome).star_index(rRNA=rRNA)
+            index = Genome(genome, repeat_masked_genome=args['repeat_masked_genome']).star_index(rRNA=rRNA)
         else:
             logging.error('unknown aligner: %s' % aligner)
             index = None # unknonwn aligner
@@ -225,8 +226,11 @@ class Alignment(object):
         # multi map
         n_map = args['n_map']
         if n_map == 0:
-            n_map == 1 # default 1, report 1 hit for each read
-        para_fq = '-k %s' % n_map
+            # n_map = 1 # default 1, report 1 hit for each read
+            # default: #look for multiple alignments, report best, with MAPQ
+            para_fq = ''
+        else:
+            para_fq = '-k %s' % n_map
 
         # fq type
         if seq_type(fq) == 'fasta':
@@ -292,7 +296,7 @@ class Alignment(object):
               --outFileNamePrefix %s \
               --runThreadN %s \
               --limitOutSAMoneReadBytes 1000000 \
-              --genomeLoad LoadAndKeep \
+              --genomeLoad NoSharedMemory  \
               --limitBAMsortRAM 10000000000 \
               --outSAMtype BAM SortedByCoordinate \
               --outFilterMismatchNoverLmax 0.07 \
@@ -344,6 +348,8 @@ class Alignment(object):
 
         # 1. genome_rRNA (rRNA: both unique, multiple)
         idx1 = index_dict['genome_rRNA']
+        if idx1 is None:
+            raise ValueError('genome_rRNA index not found: %s' % args['genome'])
         reference = self.genome + '_rRNA'
         bam_idx1, unmap_idx1 = aligner_exe(fq=fq_input, index=idx1, 
             reference=reference, unique_map=False, 
@@ -352,6 +358,9 @@ class Alignment(object):
 
         # 2. genome
         idx2 = index_dict['genome']
+        if idx2 is None:
+            raise ValueError('genome index not found: %s' % args['genome'])
+
         reference = self.genome
         bam_idx2, unmap_idx2 = aligner_exe(fq=fq_input, index=idx2, 
             reference=reference, unique_map=args['unique_only'], 
@@ -406,16 +415,19 @@ class Alignment(object):
             raise ValueError('unknown aligner: %s' % args['aligner'])
 
         # get all index in order
-        index_ext = args['index_ext']
+        # index_ext = args['index_ext']
+        bam_ext_list = []
 
-        if index_validator(index_ext, args['aligner']):
-            reference = os.path.basename(index_ext)
-            bam_ext, unmap_ext = aligner_exe(fq=fq, 
-                index=index_ext, reference=reference, unique_map=True, 
-                align_path=align_path)
-        else:
-            bam_ext = None
-        return [bam_ext]
+        for ext in args['index_ext']:
+            if index_validator(ext, args['aligner']):
+                reference = os.path.basename(ext)
+                bam_ext, unmap_ext = aligner_exe(fq=fq, 
+                    index=ext, reference=reference, unique_map=True, 
+                    align_path=align_path)
+            else:
+                bam_ext = None
+            bam_ext_list.append(bam_ext)
+        return bam_ext_list
 
 
     def run_extra(self):
@@ -530,9 +542,9 @@ class Alignment(object):
 
         # run extra index mapping
         ext_bam_files = None
-        if not args['index_ext'] is None and index_validator(args['index_ext'], args['aligner']):
+        if not args['index_ext'] is None:
             ext_bam_files = self.run_extra()
-
+        
         return [genome_bam_files, ext_bam_files]
 
 
@@ -791,7 +803,9 @@ class Alignment_stat(object):
         elif os.path.isdir(path):
             json_files = self.json_files()
             bam_files = self.bam_files()
-            if len(json_files) == 1:
+            if json_files is None: # no json files
+                self.stat = self.merge_stat() 
+            elif len(json_files) == 1:
                 self.stat = self.single_stat()
             elif json_files:
                 self.stat = self.rep_stat()
