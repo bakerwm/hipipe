@@ -107,6 +107,7 @@ class Macs2(object):
             # function to create virtualenv
             # pass
         self.venv = venv
+        is_path(self.output)
 
 
     def _tmp(self):
@@ -148,7 +149,7 @@ class Macs2(object):
         """Call peaks using MACS"""
         genome_size = self.get_gsize()
         log = os.path.join(self.output, self.prefix + '.macs2.callpeak.out')
-        c = "macs2 callpeak -f BAM -t %s -c %s -g %s --outdir %s -n %s --broad \
+        macs2_cmd = "macs2 callpeak -f BAM -t %s -c %s -g %s --outdir %s -n %s --broad \
             --keep-dup auto -B --SPMR" % (self.ip, self.control, genome_size,
             self.output, self.prefix)
         # output file
@@ -156,7 +157,9 @@ class Macs2(object):
         if os.path.exists(macs2_out) and self.overwrite is False:
             logging.info('file exists, skip macs2 callpeak')
         else:
-            self.python2_run(c)
+            logging.info('run macs2 callpeak')
+            self.python2_run(macs2_cmd, log)
+
 
 
     def bdgcmp(self, opt='ppois'):
@@ -234,6 +237,29 @@ class Macs2(object):
 
     def refinepeak(self):
         pass
+
+
+    def broadpeak_annotation(self):
+        """Annotate broadpeak using HOMER annotatePeaks.pl script
+        BED foramt
+        """
+        anno_exe = which('annotatePeaks.pl')
+        if not os.path.exists(anno_exe):
+            logging.error('command not exists, skip annotation - %s' % anno_exe)
+            return None
+
+        # broad peak file
+        broadpeak = os.path.join(self.output, self.prefix + '_peaks.broadPeak')
+        if not os.path.exists(broadpeak):
+            raise ValueError('file not found, need to run .callpeak() first - %s' % broadpeak)
+
+        # run
+        anno_peak = os.path.join(self.output, self.prefix + '_peaks.broadPeak.annotation')
+        anno_log = os.path.join(self.output, self.prefix + '_peaks.broadPeak.annotation.log')
+        cmd = 'perl %s %s %s' % (anno_exe, broadpeak, self.genome)
+        with open(anno_peak, 'wt') as fo, open(anno_log, 'wt') as fe:
+            subprocess.run(shlex.split(cmd), stdout=fo, stderr=fe)
+        return anno_peak
 
 
     def get_effect_size(self):

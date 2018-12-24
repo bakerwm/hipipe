@@ -61,6 +61,9 @@ def get_args():
     parser.add_argument('--align-to-rRNA', dest='align_to_rRNA',
         action='store_true',
         help='if specified, align to rRNA before genome')
+    parser.add_argument('--repeat-masked-genome', dest='repeat_masked_genome',
+        action='store_true',
+        help='map to repeat masked reference genome, data from EnsEMBL')
     parser.add_argument('--path_data', 
         help='The directory of genome files, default: \
         [$HOME/data/genome/]')
@@ -75,18 +78,9 @@ def main():
     fqs = [f.name for f in args.i]
     if args.o is None:
         args.o = str(pathlib.Path.cwd())
-    # tmp = Alignment(fqs, args.o, 
-    #                 smp_name=args.n, 
-    #                 genome=args.g,
-    #                 spikein=args.k, 
-    #                 index_ext=args.x,
-    #                 multi_cores=args.threads, 
-    #                 unique_only=args.unique_only,
-    #                 n_map=args.n_map,
-    #                 aligner=args.aligner,
-    #                 align_to_rRNA=args.align_to_rRNA,
-    #                 path_data=args.path_data,
-    #                 overwrite=args.overwrite).run()
+
+    args.align_to_rRNA = True # force mapping to rRNA
+    
     tmp = Alignment(
         fqs, args.o, 
         smp_name=args.n,
@@ -98,6 +92,7 @@ def main():
         n_map=args.n_map,
         aligner=args.aligner,
         align_to_rRNA=args.align_to_rRNA,
+        repeat_masked_genome=args.repeat_masked_genome,
         path_data=args.path_data,
         overwrite=args.overwrite).run()
 
