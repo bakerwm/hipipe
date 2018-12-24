@@ -84,7 +84,7 @@ def get_args():
     parser.add_argument('-p', dest='threads', metavar='threads', type=int, 
         default=8, help='Number of threads to use, default: 8')
     parser.add_argument('--aligner', default='bowtie2', 
-        choices=['bowtie', 'bowtie2', 'star'],
+        choices=['bowtie', 'bowtie2', 'STAR'],
         help='Choose which aligner to use. default: bowtie2')
     parser.add_argument('-x', metavar='align_index',
         help='A fasta file used to do post-genomic mapping and analysis. For \
@@ -284,6 +284,9 @@ def chipseq_genome():
         p.bdgcmp(opt='ppois')
         p.bdgcmp(opt='FE')
         p.bdgcmp(opt='logLR')
+        # annotate peaks
+        p.broadpeak_annotation()
+
 
     ###################
     ## create bigWig ##
@@ -302,41 +305,44 @@ def chipseq_genome():
     #########################
     ## transposon analysis ##
     #########################
-    if isinstance(ctl_bam_files, list) and isinstance(tre_bam_files, list):
-        # fetch the scale
-        te_path = prj_path['transposon_analysis']
-        for i in ext_tre_bam_files:
-            i_index = ext_tre_bam_files.index(i)
-            # genome mapping BAM
-            ext_tre_bam = i[0]
-            tre_bam = tre_bam_files[i_index]
-            if i_index >= len(ext_ctl_bam_files):
-                i_index = 0
-            ext_ctl_bam = ext_ctl_bam_files[i_index][0]
-            ctl_bam = ctl_bam_files[i_index]
-            # fetch the normalize scale
-            tre_bam_prefix = file_prefix(tre_bam)[0]
-            tre_bam_path = os.path.join(prj_path['macs2_output'], tre_bam_prefix)
-            p = Macs2(ip=tre_bam, control=ctl_bam, genome=args.g, output=tre_bam_path, 
-                prefix=tre_bam_prefix)
-            d = p.get_effect_size() # ip_scale, ip_depth, input_scale, input_depth
+    if ext_tre_bam_files is None or ext_ctl_bam_files is None:
+        logging.info('transposon analysis skipped')
+    else:
+        if isinstance(ctl_bam_files, list) and isinstance(tre_bam_files, list):
+            # fetch the scale
+            te_path = prj_path['transposon_analysis']
+            for i in ext_tre_bam_files:
+                i_index = ext_tre_bam_files.index(i)
+                # genome mapping BAM
+                ext_tre_bam = i[0]
+                tre_bam = tre_bam_files[i_index]
+                if i_index >= len(ext_ctl_bam_files):
+                    i_index = 0
+                ext_ctl_bam = ext_ctl_bam_files[i_index][0]
+                ctl_bam = ctl_bam_files[i_index]
+                # fetch the normalize scale
+                tre_bam_prefix = file_prefix(tre_bam)[0]
+                tre_bam_path = os.path.join(prj_path['macs2_output'], tre_bam_prefix)
+                p = Macs2(ip=tre_bam, control=ctl_bam, genome=args.g, output=tre_bam_path, 
+                    prefix=tre_bam_prefix)
+                d = p.get_effect_size() # ip_scale, ip_depth, input_scale, input_depth
 
-            # bam to bigWig            
-            te_sub_path = os.path.join(te_path, tre_bam_prefix)
-            bam2bigwig2(ext_tre_bam, te_sub_path, scale=d['ip_scale'], 
-                overwrite=args.overwrite)
-            bam2bigwig2(ext_ctl_bam, te_sub_path, scale=d['input_scale'], 
-                overwrite=args.overwrite)
+                # bam to bigWig            
+                te_sub_path = os.path.join(te_path, tre_bam_prefix)
+                bam2bigwig2(ext_tre_bam, te_sub_path, scale=d['ip_scale'], 
+                    overwrite=args.overwrite)
+                bam2bigwig2(ext_ctl_bam, te_sub_path, scale=d['input_scale'], 
+                    overwrite=args.overwrite)
 
-            # save scale to file            
-            s = os.path.join(te_sub_path, 'scale.lib')
-            with open(s, 'wt') as fo:
-                fo.write(json.dumps(d))
+                # save scale to file            
+                s = os.path.join(te_sub_path, 'scale.lib')
+                with open(s, 'wt') as fo:
+                    fo.write(json.dumps(d))
 
-            # create coverage plots
-            pdf_out = os.path.join(te_sub_path, tre_bam_prefix + '.track_view.pdf')
-            fasize  = 'abc.fa'
-            bigwig2track_single(ext_tre_bam, ext_ctl_bam, fasize, 'P5', pdf_out)
+                # create coverage plots
+                pdf_out = os.path.join(te_sub_path, tre_bam_prefix + '.track_view.pdf')
+                fasize  = 'abc.fa'
+                bigwig2track_single(ext_tre_bam, ext_ctl_bam, fasize, 'P5', pdf_out)
 
 
     # return [ctl_bam_files, tre_bam_files]
