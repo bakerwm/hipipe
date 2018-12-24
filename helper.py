@@ -765,10 +765,12 @@ def index_validator(index, aligner='bowtie'):
     return flag
 
 
-def index_finder(genome, aligner='bowtie', rRNA=False, genome_path=None):
+def index_finder(genome, aligner='bowtie', rRNA=False, genome_path=None,
+    repeat_masked_genome=False):
     """Find aligner index
     if rRNA is True, return the rRNA index only
     if return None, the index not found, or file not exists
+    check if repeat masked genome required (for non-TE mapping)
     
     structure of genome_path:
     default: {HOME}/data/genome/{genome_version}/{aligner}/
@@ -796,7 +798,11 @@ def index_finder(genome, aligner='bowtie', rRNA=False, genome_path=None):
             idx = None
     # genome
     else:
-        idx = os.path.join(genome_path, genome, aligner + '_index', 'genome')
+        if repeat_masked_genome:
+            tag = 'genome_rm'
+        else:
+            tag = 'genome'
+        idx = os.path.join(genome_path, genome, aligner + '_index', tag)
 
     # validate
     if not index_validator(idx, aligner):
@@ -833,12 +839,14 @@ class Genome(object):
 
     """
 
-    def __init__(self, genome, genome_path=None, **kwargs):
+    def __init__(self, genome, genome_path=None, repeat_masked_genome=False, **kwargs):
         assert isinstance(genome, str)
         self.genome = genome
         if not genome_path:
             genome_path = os.path.join(pathlib.Path.home(), 'data', 'genome')
         self.genome_path = genome_path
+        self.repeat_masked_genome = repeat_masked_genome
+        self.kwargs = kwargs
 
 
     def get_fa(self):
@@ -880,7 +888,8 @@ class Genome(object):
         optional, return rRNA index
         """
         index = index_finder(self.genome, aligner='bowtie', rRNA=rRNA,
-            genome_path=self.genome_path)
+            genome_path=self.genome_path, 
+            repeat_masked_genome=self.repeat_masked_genome)
         return index
 
 
@@ -889,7 +898,8 @@ class Genome(object):
         optional, return rRNA index
         """
         index = index_finder(self.genome, aligner='bowtie2', rRNA=rRNA,
-            genome_path=self.genome_path)
+            genome_path=self.genome_path, 
+            repeat_masked_genome=self.repeat_masked_genome)
         return index
 
 
@@ -898,7 +908,8 @@ class Genome(object):
         optional, return rRNA index
         """
         index = index_finder(self.genome, aligner='STAR', rRNA=rRNA,
-            genome_path=self.genome_path)
+            genome_path=self.genome_path, 
+            repeat_masked_genome=self.repeat_masked_genome)
         return index
 
 
@@ -907,7 +918,8 @@ class Genome(object):
         optional, return rRNA index
         """
         index = index_finder(self.genome, aligner='hisat2', rRNA=rRNA,
-            genome_path=self.genome_path)
+            genome_path=self.genome_path, 
+            repeat_masked_genome=self.repeat_masked_genome)
         return index
 
 
