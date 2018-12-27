@@ -1004,11 +1004,12 @@ class BAM(object):
     def to_bed(self, bed=None):
         """Convert BAM to bed using bedtools"""
         bam = self.fn
-        bed = os.path.splitext(bam)[0] + '.bed'
-        if not bed:
+        if bed is None:
+            bed = os.path.splitext(bam)[0] + '.bed'
+        if not os.path.exists(bed):
             pybedtools.BedTool(bam).bam_to_bed().saveas(bed)
         return bed
-
+        
 
     def is_indexed(self, overwrite=False):
         """Check if *.bai file exists"""
