@@ -14,13 +14,7 @@ import datetime
 import gzip
 import json
 import binascii
-# import shlex
-# import subprocess
-# import shutil
 import logging
-# import pandas as pd
-# import Bio
-# from Bio import SeqIO
 
 
 
@@ -373,7 +367,6 @@ def bc_demx_pe(fn1, fn2, smp_list, path_out, n_mismatch=0, bc_in_read=1,
     # save report
     report_file = os.path.join(path_out, 'report_demx.json')
     Json_file(bc_count).json_writer(report_file)
-
 
 
 def main():
