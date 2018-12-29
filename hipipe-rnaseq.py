@@ -174,6 +174,7 @@ def fc_run(gtf, bam, fout, strandness=0, threads=8, overwrite=False):
         fo.write(c1 + '\n')
 
     # run cmd
+    print(c1)
     if os.path.exists(fout) and overwrite is False:
         logging.info('file exists: %s' % fout)
         return fout
@@ -221,7 +222,6 @@ def main():
         args.o = str(pathlib.Path.cwd())
 
     # prep-dirs
-    # subdirs = ['genome_mapping', 'count', 'bigWig', 'report', 'src']
     prj_path = prepare_project(args.o)
 
     # path_out
@@ -240,12 +240,13 @@ def main():
     if args.A is None:
         args.A = ctl_prefix
     ctl_path = os.path.join(prj_path['genome_mapping'], args.A)
-    ctl_bam_files, tmp = Alignment(
+    ctl_bam_files, ctl_bam_ext_files = Alignment(
         fqs=ctl_fqs, 
         path_out=ctl_path, 
         smp_name=args.A,
         genome=args.g,
         spikein=args.k, 
+        index_ext=args.x,
         multi_cores=args.p,
         unique_only=args.unique_only, 
         aligner=args.aligner,
@@ -260,19 +261,19 @@ def main():
     if args.B is None:
         args.B = tre_prefix
     tre_path = os.path.join(prj_path['genome_mapping'], args.B)
-    tre_bam_files, tmp = Alignment(
+    tre_bam_files, tre_bam_ext_files = Alignment(
         fqs=tre_fqs, 
         path_out=tre_path, 
         smp_name=args.B,
         genome=args.g,
         spikein=args.k, 
+        index_ext=args.x,
         multi_cores=args.p,
         unique_only=args.unique_only, 
         aligner=args.aligner,
         align_to_rRNA=args.align_to_rRNA,
         path_data=args.path_data,
         overwrite=args.overwrite).run()
-
 
     # ## create bigWig files ##
     map_bam_files = ctl_bam_files + tre_bam_files
@@ -286,7 +287,6 @@ def main():
             binsize=args.bin_size, 
             overwrite=args.overwrite)
 
-
     ## count ##
     count_path = prj_path['count']
     count_file = os.path.join(count_path, 'count.txt')
@@ -294,7 +294,6 @@ def main():
     map_bam_files = [f for f in map_bam_files if '_rep' in f]
     count_file = fc_run(args.gtf, map_bam_files, count_file,
         args.s, overwrite=args.overwrite)
-
 
     # ## DE analysis ##
     # using R code #
@@ -304,7 +303,6 @@ def main():
     c1 = '/usr/bin/Rscript %s %s %s %s' % (run_deseq2, count_file, args.g, args.o)
     subprocess.run(shlex.split(c1), stdout=subprocess.PIPE)
 
-
     ## mapping stat ##
     map_stat_path = prj_path['report']
     map_stat_file = os.path.join(map_stat_path, 'mapping.stat')
@@ -312,14 +310,8 @@ def main():
     tre_map = map_stat(tre_path)
     df_map = pd.concat([ctl_map, tre_map], axis=0).reset_index()
     df_map = df_map.sort_values(['index'])
+    print(df_map)
     df_map.to_csv(map_stat_file, sep='\t', header=True, index=False)
-
-    # report
-    # mapping report
-    # de analysis report
-    # plots
-    # gene lists
-    # run DE analysis
 
     #########################
     ## Transposon analysis ##
@@ -327,54 +319,18 @@ def main():
     if args.g == 'dm3': # support dm3 TE analysis only
         logging.info('## For Transposon analysis ##')
         te_path = prj_path['transposon_analysis']
-        ## mapping ##
         te_mapping_path = os.path.join(te_path, 'genome_mapping')
         assert is_path(te_mapping_path)
-        # control
-        ctl_fqs = [f.name for f in args.a]
-        ctl_prefix = str_common([os.path.basename(f) for f in ctl_fqs])
-        ctl_prefix = ctl_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
-        if args.A is None:
-            args.A = ctl_prefix
-        te_ctl_path = os.path.join(te_mapping_path, args.A)
-        te_ctl_bam_files = Alignment(
-            fqs=ctl_fqs, 
-            path_out=te_ctl_path, 
-            smp_name=args.A,
-            genome=args.g,
-            spikein=args.k,
-            index_ext=args.x,
-            multi_cores=args.p,
-            unique_only=args.unique_only, 
-            aligner=args.aligner,
-            align_to_rRNA=args.align_to_rRNA,
-            path_data=args.path_data,
-            overwrite=args.overwrite).run()
 
-        # treatment
-        tre_fqs = [f.name for f in args.b]
-        tre_prefix = str_common([os.path.basename(f) for f in tre_fqs])
-        tre_prefix = tre_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
-        if args.B is None:
-            args.B = tre_prefix
-        te_tre_path = os.path.join(te_mapping_path, args.B)
-        te_tre_bam_files = Alignment(
-            fqs=tre_fqs, 
-            path_out=te_tre_path, 
-            smp_name=args.B,
-            genome=args.g,
-            spikein=args.k,
-            index_ext=args.x,
-            multi_cores=args.p,
-            unique_only=args.unique_only, 
-            aligner=args.aligner,
-            align_to_rRNA=args.align_to_rRNA,
-            path_data=args.path_data,
-            overwrite=args.overwrite).run()
+        te_ctl_path = os.path.join(ctl_path, 'extra_mapping')
+        te_tre_path = os.path.join(tre_path, 'extra_mapping')
+       
+        ## TE mapping
+        te_map_bam_files = ctl_bam_ext_files + tre_bam_ext_files
+        # flatten the nested lists
+        te_map_bam_files = [item for sublist in te_map_bam_files for item in sublist]
 
-
-        # ## create bigWig files ##
-        te_map_bam_files = te_ctl_bam_files + te_tre_bam_files
+        ## make bigWig
         te_bw_path = os.path.join(te_path, 'bigWig')
         assert is_path(te_bw_path)
         # for bam in te_map_bam_files:
@@ -386,25 +342,23 @@ def main():
         #         binsize=args.bin_size, 
         #         overwrite=args.overwrite)
 
-        # ## count ##
+        ## count ##
         te_count_path = os.path.join(te_path, 'count')
         assert is_path(te_count_path)
         te_count_file = os.path.join(te_count_path, 'count.txt')
         # !!!!
         te_gtf = '/home/data/genome/dm3/dm3_transposon/dm3.transposon.gtf'
+
         # only kepp replicate samples
         te_map_bam_files = [f for f in te_map_bam_files if '_rep' in f]
         te_count_file = fc_run(te_gtf, te_map_bam_files, te_count_file,
             args.s, overwrite=args.overwrite)
 
         # ## DE analysis ##
-        # using R code #
-        # de_run(args.A, args.B, count_file)
         te_de_path = os.path.join(te_path, 'de_analysis')
         run_deseq2 = '/home/wangming/work/wmlib/hipipe/run_deseq2.R'
-        c1 = '/usr/bin/Rscript %s %s %s' % (run_deseq2, te_count_file, te_path)
+        c1 = '/usr/bin/Rscript %s %s %s %s' % (run_deseq2, te_count_file, args.g, te_path)
         subprocess.run(shlex.split(c1))
-
 
         ## mapping stat ##
         te_stat_path = os.path.join(te_path, 'report')
@@ -416,7 +370,6 @@ def main():
         df_map = df_map.sort_values(['index'])
         print(df_map)
         df_map.to_csv(te_stat_file, sep='\t', header=True, index=False)
-
 
 
 if __name__ == '__main__':

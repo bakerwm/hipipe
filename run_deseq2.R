@@ -35,7 +35,7 @@ path_de <- file.path(path_results, "de_analysis")
 DESeq2_for_featureCounts(file_count, organism, path_de, pvalue_cutoff = 0.1)
 
 # Generate plots
-fs <- list.files(path_de, "transcripts_deseq2.csv", TRUE, TRUE, TRUE)
+fs <- list.files(path_de, "transcripts_deseq2.csv$", TRUE, TRUE, TRUE)
 print(fs)
 #
 # ##----------------------------------------------------------------------------##
@@ -43,14 +43,14 @@ print(fs)
 f_name = paste("genelist", organism, "rda", sep = ".")
 f = system.file("extdata", f_name, package = "goldclipReport")
 load(f) # genelist
-#
-# df <- DESeq2_csv2df(fs)
-# df2 <- dplyr::mutate(df, id = as.character(id)) %>%
-#   dplyr::mutate(id = plyr::mapvalues(id, genelist$gene_id, genelist$gene_name, FALSE)) %>%
-#   dplyr::filter(! is.na(padj)) %>%
-#   dplyr::arrange(padj)
-# fs2 <- paste0(fs, ".fix.xls")
-# readr::write_delim(df2, fs2, delim = "\t", col_names = TRUE)
+
+df <- DESeq2_csv2df(fs)
+df2 <- dplyr::mutate(df, id = as.character(id)) %>%
+  dplyr::mutate(id = plyr::mapvalues(id, genelist$gene_id, genelist$gene_name, FALSE)) %>%
+  dplyr::filter(! is.na(padj)) %>%
+  dplyr::arrange(padj)
+fs2 <- paste0(fs, ".fix.xls")
+readr::write_delim(df2, fs2, delim = "\t", col_names = TRUE)
 # ##----------------------------------------------------------------------------##
 
 print("generate publishable plots")
