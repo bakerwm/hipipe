@@ -33,16 +33,10 @@ __date__ = "2018-03-21"
 __version__ = "0.1"
 
 
-# import os
-# import sys
-# import re
-# import shlex
-# import subprocess
-# import logging
+import logging
 import argparse
 from trimmer import Trimmer
-# from helper import *
-
+from arguments import args_init
 
 
 def get_args():
@@ -55,33 +49,34 @@ def get_args():
     """
     parser = argparse.ArgumentParser(prog='trimmer', 
                                      description='trimming reads')
-    parser.add_argument('-i', nargs='+', required=True, metavar='file', 
-        type=argparse.FileType('r'),
-        help='reads in FASTQ format, support (*.gz), 1-4 files.')
-    parser.add_argument('-a', default='AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC', 
+    parser.add_argument('-i', '--fq1', nargs='+', required=True, 
+        help='reads in FASTQ files, support (*.gz), 1-4 files.')
+    parser.add_argument('-a', '--adapter3',  default='AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC', 
         metavar='adapter', type=str,
         help='3-Adapter, default: [AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC].')
-    parser.add_argument('-o', default=None, metavar='output', 
+    parser.add_argument('-o', '--path_out', default=None, 
         help='The directory to save results.')
-    parser.add_argument('-g', default='', metavar='adapter-5', type=str,
+    parser.add_argument('-g', '--adapter5', default='',
         help='5-Adapter, default: None')
-    parser.add_argument('-m', default=15, metavar='len_min', 
+    parser.add_argument('-m', '--len_min', default=15, metavar='len_min', 
         type=int, help='Minimum length of reads after trimming, defualt [15]')
-    parser.add_argument('--read12', type=int, default=1, metavar='read12',
+    parser.add_argument('--read12', type=int, default=1,
         help='which one of PE reads, 1=read1, 2=read2, default: 1')
     
     ## global arguments    
-    parser.add_argument('-q', default=20, metavar='quality', type=int,
+    parser.add_argument('-q', '--qual-min', default=20, type=int,
+        dest='qual_min',
         help='The cutoff of base quality, default [20]')    
-    parser.add_argument('-e', default=0.1, metavar='err_rate', type=float,
+    parser.add_argument('-e', '--error-rate', default=0.1, type=float,
+        dest='error_rate',
         help='Maximum allowed error rate, default [0.1]')
-    parser.add_argument('-O', default=3, metavar='overlap', type=int,
+    parser.add_argument('-O', '--overlap', default=3, type=int,
         help='Required N bases overlap between reads and adapter, default [3]')
-    parser.add_argument('-p', default=80, metavar='percent', type=int,
+    parser.add_argument('-p', '--percent', default=80, type=int,
         help='minimum percent of bases that must have -q quality, default [80]')
     parser.add_argument('--rm-untrim', action='store_true', dest='rm_untrim',
         help='if specified, discard reads without adapter')
-    parser.add_argument('--threads', default=1, metavar='threads', type=int,
+    parser.add_argument('--threads', default=1, type=int,
         help='Number of threads to launch, default [1]')
     parser.add_argument('--overwrite', action='store_true',
         help='if spcified, overwrite exists file')
@@ -118,51 +113,33 @@ def get_args():
     ## PE arguments
     parser.add_argument('--fq2', nargs='+', default=None, 
         help='The read2 of pair-end reads')
-    parser.add_argument('-A', default='AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT',
+    parser.add_argument('-A', '--AD3', default='AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT',
         help='The 3 adapter of read2, default: AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT')
-    parser.add_argument('-G', default=None,
+    parser.add_argument('-G', '--AD5', default=None,
         help='The 5 adapter of read1, default: None')
     args = parser.parse_args()
     return args
 
 
 def main():
-    args = get_args()
-    fq_files = [f.name for f in args.i]
+    # args = vars(get_args()) # save as dictionary
+    args = args_init(vars(get_args()), trim=True, align=False, call_peak=False) # save as dictionary
+    fq1_files = args.pop('fq1', None) # remove  'fq1'
 
+    logging.info('trimming start')
     ## SE mode
-    if args.fq2 is None: 
-        for fq in fq_files:
-            tmp = Trimmer(fq, args.a, args.o, args.m,
-                adapter5=args.g, read12=args.read12, 
-                qual_min=args.q, error_rate=args.e, overlap=args.O,
-                rm_untrim=args.rm_untrim, threads=args.threads, 
-                overwrite=args.overwrite, keep_name=args.keep_name,
-                adapter_sliding=args.adapter_sliding, 
-                trim_times=args.trim_times,
-                double_trim=args.double_trim,
-                rm_dup=args.rm_dup,
-                cut_before_trim=args.cut_before_trim,
-                cut_after_trim=args.cut_after_trim,
-                trim_to_length=args.trim_to_length).run()
+    if args['fq2'] is None:
+        for fq1 in fq1_files:
+            tmp = Trimmer(fq1=fq1, **args).run()
+
     ## PE mode
     else:
-        # fq2_files = [f.name for f in args.fq2]
-        fq2_files = args.fq2
-        for fq1, fq2 in zip(fq_files, fq2_files):
-            tmp = Trimmer(fq1, args.a, args.o, args.m,
-                adapter5=args.g, read12=args.read12, 
-                fq2=fq2, AD3=args.A, AD5=args.G,
-                qual_min=args.q, error_rate=args.e, overlap=args.O,
-                rm_untrim=args.rm_untrim, threads=args.threads, 
-                overwrite=args.overwrite, keep_name=args.keep_name,
-                adapter_sliding=args.adapter_sliding, 
-                trim_times=args.trim_times,
-                double_trim=args.double_trim,
-                rm_dup=args.rm_dup,
-                cut_before_trim=args.cut_before_trim,
-                cut_after_trim=args.cut_after_trim,
-                trim_to_length=args.trim_to_length).run()
+        fq2_files = args.pop('fq2', None) # remove 'fq2'
+        for fq1, fq2 in zip(fq1_files, fq2_files):
+            tmp = Trimmer(fq1=fq1, fq2=fq2, **args).run()
+
+    logging.info('trimming finish')
+
 
 if __name__ == '__main__':
     main()
