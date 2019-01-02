@@ -31,7 +31,7 @@ class Alignment(object):
     """Run alignment for SE reads using bowtie/bowtie2/STAR"""
 
     def __init__(self, fqs, path_out, smp_name, genome, **kwargs):
-        """parse arguments
+        """Parse arguments
         required arguments: fqs, path_out, smp_name, genome, genome, spikein,
         index_ext, threads, unique_only, n_map, aligner, align_to_rRNA,
         genome_path, overwrite
@@ -421,8 +421,11 @@ class Alignment(object):
         for ext in args['index_ext']:
             if index_validator(ext, args['aligner']):
                 reference = os.path.basename(ext)
-                bam_ext, unmap_ext = aligner_exe(fq=fq, 
-                    index=ext, reference=reference, unique_map=True, 
+                bam_ext, unmap_ext = aligner_exe(
+                    fq=fq, 
+                    index=ext, 
+                    reference=reference, 
+                    unique_map=True, 
                     align_path=align_path)
             else:
                 bam_ext = None
@@ -968,7 +971,7 @@ class Alignment_stat(object):
                 index=[merge_path_name])
             return df_merge
         else:
-            logging.error('%10s | not contain mapping files: %s' % ('failed', path))
+            logging.error('%10s | not contain mapping files: %s' % ('failed', self.path))
             return None
 
 
@@ -980,7 +983,8 @@ class Alignment_stat(object):
             _out = os.path.join(os.path.dirname(path),
                                 prefix + '.mapping_stat.csv')
         df = self.stat
-        df.to_csv(_out, sep='\t', header=True, index=True)
+        if isinstance(df, pd.DataFrame):
+            df.to_csv(_out, sep='\t', header=True, index=True)
         
         return _out
 

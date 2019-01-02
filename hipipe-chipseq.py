@@ -42,12 +42,11 @@ $ hipipe-align.py -i in.clean.fq -o path_out -n smp -g dm3
 
 DESeq2 analysis
 
-# 4. vier
+# 4. viewer
 
 Create bigWig for merged samples.
 
 """
-
 import os
 import sys
 import pathlib
@@ -74,9 +73,6 @@ def get_args():
     parser.add_argument('-g', required=True, default='hg19', 
         metavar='GENOME', choices=['dm3', 'hg19', 'hg38', 'mm10', 'mm9'],
         help='Reference genome : dm3, hg19, hg39, mm10, default: hg19')
-    # parser.add_argument('-k', default=None, 
-    #     metavar='Spike-in', choices=[None, 'dm3', 'hg19', 'hg38', 'mm10'],
-    #     help='Spike-in genome : dm3, hg19, hg38, mm10, default: None')
     parser.add_argument('-C', metavar='Control', default=None,
         help='Name control samples')
     parser.add_argument('-T', metavar='Treatment', default=None,
@@ -86,7 +82,7 @@ def get_args():
     parser.add_argument('--aligner', default='bowtie2', 
         choices=['bowtie', 'bowtie2', 'STAR'],
         help='Choose which aligner to use. default: bowtie2')
-    parser.add_argument('-x', metavar='align_index',
+    parser.add_argument('-x', nargs='+', metavar='align_index',
         help='A fasta file used to do post-genomic mapping and analysis. For \
         example, -x FL10B.fa, after mapping reads to genome, reads are mapped to \
         FL10B sequence.')
@@ -183,10 +179,6 @@ plot_n_pages(plist, nrow = 5, ncol = 2, pdf_out = pdf_out)
     # subprocess.run(shlex.split('Rscripts %s') % r_code)
 
 
-
-
-
-
 def chipseq_genome():
     args = get_args()
     if args.o is None:
@@ -258,12 +250,6 @@ def chipseq_genome():
     # df_map = df_map.sort_values(['index'])
     # df_map.to_csv(map_stat_file, sep='\t', header=True, index=False)
 
-    # report
-    # mapping report
-    # de analysis report
-    # plots
-    # gene lists
-    # run DE analysis
 
     ################
     ## call peaks ##
@@ -335,9 +321,10 @@ def chipseq_genome():
                     overwrite=args.overwrite)
 
                 # save scale to file            
-                s = os.path.join(te_sub_path, 'scale.lib')
-                with open(s, 'wt') as fo:
-                    fo.write(json.dumps(d))
+                s1 = os.path.join(te_sub_path, 'scale.pickle')
+                s2 = os.path.join(te_sub_path, 'scale.lib')
+                args_checker(d, s1)
+                args_logger(d, s2)
 
                 # create coverage plots
                 pdf_out = os.path.join(te_sub_path, tre_bam_prefix + '.track_view.pdf')
@@ -346,14 +333,6 @@ def chipseq_genome():
 
 
     # return [ctl_bam_files, tre_bam_files]
-
-
-
-
-
-
-
-
 
 
 
