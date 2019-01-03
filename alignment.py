@@ -456,7 +456,7 @@ class Alignment(object):
         bam_out = []
 
         # run alignment for replicates
-        for fq in args['fqs']:
+        for fq in args['fq1']:
             logging.info('alignment: %s' % fq)
             fq_prefix = file_prefix(fq)[0]
             fq_prefix = re.sub('\.clean|\.nodup|\.cut', '', fq_prefix)
@@ -467,7 +467,6 @@ class Alignment(object):
             bam_out.append(bam_files) #
             # stat alignment
             Alignment_stat(fq_path).saveas()
-
 
         # merge bam files
         if args['merge_rep']: 
@@ -482,7 +481,7 @@ class Alignment(object):
                     merged_bam_name = args['smp_name'] + merged_suffix
                     merged_bam_file =  os.path.join(merged_path, merged_bam_name)
                     if os.path.exists(merged_bam_file) and args['overwrite'] is False:
-                        logging.info('file exists: %s' % merged_bam_file)
+                        logging.info('bam file exists: %s' % merged_bam_file)
                     else:
                         tmp = bam_merge(rep_bam_files, merged_bam_file)
                     merged_files.append(merged_bam_file)
@@ -507,21 +506,21 @@ class Alignment(object):
         # run alignment for replicates
         for fq in args['fq1']:
             logging.info('alignment: %s' % fq)
+            args_fq = args.copy()
             fq_prefix = file_prefix(fq)[0]
             fq_prefix = re.sub('\.clean|\.nodup|\.cut', '', fq_prefix)
-            fq_path = os.path.join(args['path_out'], fq_prefix)
+            fq_path = os.path.join(args_fq['path_out'], fq_prefix)
+            args_fq['path_out'] = fq_path
             assert is_path(fq_path)
 
             ## save arguments
             args_file = os.path.join(fq_path, fq_prefix + '.arguments.txt')
             args_pickle = os.path.join(fq_path, fq_prefix + '.arguments.pickle')
-            if args_checker(args, args_pickle) and args['overwrite'] is False:
+            if args_checker(args_fq, args_pickle) and args['overwrite'] is False:
                 logging.info('files exists, arguments not changed, alignment skipped - %s' % fq_prefix)
                 # return True
             else:
-                # logging.info('arguments updated, overwrite=True, re-run alignment - %s' % fq_prefix)
-                args_logger(args, args_file, True) # update arguments.txt
-                args['overwrite'] = True
+                args_logger(args_fq, args_file, True) # update arguments.txt
 
             bam_files = self.align_batch_se(fq, fq_path)
             bam_out.append(bam_files) # 
@@ -534,7 +533,6 @@ class Alignment(object):
             merged_files = []
             if len(bam_out) > 1: # for multiple bam files
                 assert is_path(merged_path)
-                print('AAAA')
                 for i in range(len(bam_out[0])):
                     rep_bam_files = [b[i] for b in bam_out]
                     merged_suffix = str_common(rep_bam_files, suffix=True)
@@ -546,7 +544,6 @@ class Alignment(object):
                     else:
                         tmp = bam_merge(rep_bam_files, merged_bam_file)
                     merged_files.append(merged_bam_file)
-                print('BBBB')
                 Alignment_stat(merged_path).saveas()
                 bam_out.append(merged_files)
 
