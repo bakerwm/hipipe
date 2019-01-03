@@ -18,6 +18,7 @@ import os
 import sys
 import pathlib
 import argparse
+from arguments import args_init
 from alignment import Alignment, Alignment_log, Alignment_stat
 
 
@@ -28,25 +29,23 @@ def get_args():
     """
     parser = argparse.ArgumentParser(prog='aligner', 
                                      description='mapping reads')
-    parser.add_argument('-i', nargs='+', required=True, metavar='INPUT', 
-        type=argparse.FileType('r'),
+    parser.add_argument('-i', '--fq1', nargs='+', required=True,
         help='CLIP reads in FASTQ format, (not *.gz), 1-4 files.')
-    parser.add_argument('-o', default=None, 
-        metavar='OUTPUT',  help='The directory to save results, default, \
+    parser.add_argument('-o', '--path_out', default=None, 
+        help='The directory to save results, default, \
         current working directory.')
-    parser.add_argument('-n', required=True, metavar='NAME',
+    parser.add_argument('-n', '--smp_name', required=True,
         help='Name of the experiment')
-    parser.add_argument('-g', required=True, default='hg19', 
-        metavar='GENOME', choices=['dm3', 'hg19', 'hg38', 'mm10', 'mm9'],
+    parser.add_argument('-g', '--genome', required=True, default='hg19', 
+        choices=['dm3', 'hg19', 'hg38', 'mm10', 'mm9'],
         help='Reference genome : dm3, hg19, hg39, mm10, default: hg19')
-    parser.add_argument('-k', default=None, 
-        metavar='Spike-in', choices=[None, 'dm3', 'hg19', 'hg38', 'mm10'],
+    parser.add_argument('-k', '--spikein', default=None, 
+        choices=[None, 'dm3', 'hg19', 'hg38', 'mm10'],
         help='Spike-in genome : dm3, hg19, hg38, mm10, default: None')
-    parser.add_argument('-x', nargs='+', metavar='align_index',
+    parser.add_argument('-x', '--ext_index', nargs='+',
         help='Provide alignment index(es) for alignment, support multiple\
         indexes. if specified, ignore -g, -k')
-    parser.add_argument('--threads', default=8, 
-        metavar='THREADS', type=int, 
+    parser.add_argument('--threads', default=8, type=int, 
         help='Number of threads to launch, default: 8.')
     parser.add_argument('--unique-only', action='store_true',
         dest='unique_only',
@@ -74,27 +73,26 @@ def get_args():
 
 
 def main():
-    args = get_args()
-    fqs = [f.name for f in args.i]
-    if args.o is None:
-        args.o = str(pathlib.Path.cwd())
+    args = args_init(vars(get_args()), trim=False, align=True, call_peak=False) # save as dictionary
 
-    args.align_to_rRNA = True # force mapping to rRNA
-    
-    tmp = Alignment(
-        fqs, args.o, 
-        smp_name=args.n,
-        genome=args.g,
-        spikein=args.k, 
-        index_ext=args.x,
-        threads=args.threads, 
-        unique_only=args.unique_only,
-        n_map=args.n_map,
-        aligner=args.aligner,
-        align_to_rRNA=args.align_to_rRNA,
-        repeat_masked_genome=args.repeat_masked_genome,
-        path_data=args.path_data,
-        overwrite=args.overwrite).run()
+    # specific
+    args['align_to_rRNA'] = True # force mapping to rRNA
+    tmp = Alignment(**args).run()
+
+    # tmp = Alignment(
+    #     fqs, args.o, 
+    #     smp_name=args.n,
+    #     genome=args.g,
+    #     spikein=args.k, 
+    #     index_ext=args.x,
+    #     threads=args.threads, 
+    #     unique_only=args.unique_only,
+    #     n_map=args.n_map,
+    #     aligner=args.aligner,
+    #     align_to_rRNA=args.align_to_rRNA,
+    #     repeat_masked_genome=args.repeat_masked_genome,
+    #     path_data=args.path_data,
+    #     overwrite=args.overwrite).run()
 
 if __name__ == '__main__':
     main()

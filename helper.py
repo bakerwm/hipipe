@@ -78,7 +78,7 @@ def args_checker(d, x, update=False):
     elif isinstance(x, str):
         # save dict to new file
         with open(x, 'wb') as fo:
-                    pickle.dump(d, fo, protocol=pickle.HIGHEST_PROTOCOL)
+            pickle.dump(d, fo, protocol=pickle.HIGHEST_PROTOCOL)
     else:
         logging.error('illegal x= argument: %s' % x)
     return flag
@@ -1004,12 +1004,19 @@ class Genome(object):
         return g
 
 
-    def te(self):
+    def te(self, format='gtf'):
         """Return TE annotation of the genome
         or return TE consensus sequence for the genome (dm3)
         """
-        pass
-        # additional Class
+        # only dm3 supported
+        te_gtf = os.path.join(self.genome_path, self.genome, 
+            self.genome + '_transposon', 
+            self.genome + '_transposon.gtf')
+        print(te_gtf)
+        if not os.path.exists(te_gtf):
+            te_gtf = None
+
+        return te_gtf
 
 
 class BAM(object):

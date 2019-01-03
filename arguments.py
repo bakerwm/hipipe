@@ -5,6 +5,7 @@ Prepare arguments for goldclip pipeline
 
 def args_init(args=None, trim=True, align=True, call_peak=True):
         """Inititate the arguments, assign the default values to arg
+        positional arg: smp, genome
         """
         if isinstance(args, dict):
             pass
@@ -49,9 +50,14 @@ def args_init(args=None, trim=True, align=True, call_peak=True):
         ## alignment
         if align:
             args['spikein'] = args.get('spikein', None)
+            args['index_ext'] = args.get('index_ext', None)
             args['unique_only'] = args.get('unique_only', True) # unique map
             args['aligner'] = args.get('aligner', 'bowtie') # bowtie alignment
             args['align-to-rRNA'] = args.get('align-to-rRNA', True)
+            args['n_map'] = args.get('n_map', 0)
+            args['align_to_rRNA'] = args.get('align_to_rRNA', True)
+            args['repeat_masked_genome'] = args.get('repeat_masked_genome', False)
+            args['merge_rep'] = args.get('merge_rep', True)
 
         ## peak-calling
         if call_peak:

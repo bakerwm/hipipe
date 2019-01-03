@@ -49,6 +49,7 @@ import argparse
 import shlex
 import subprocess
 import pysam
+from arguments import args_init
 from helper import *
 from alignment import Alignment, Alignment_log, Alignment_stat
 
@@ -57,29 +58,27 @@ def get_args():
     parser = argparse.ArgumentParser(prog='RNAseq-pipeline', 
                                      description='DEseq analysis')
     parser.add_argument('-a', nargs='+', required=True, metavar='control_fq',
-        type=argparse.FileType('r'),
         help='FASTQ files of Control sample replicates')
     parser.add_argument('-b', nargs='+', required=True, metavar='treatment_fq',
-        type=argparse.FileType('r'),
         help='FASTQ files of Treatment sample, replicates')
-    parser.add_argument('-o', default=None, metavar='OUTPUT',  
+    parser.add_argument('-o', '--path-out', default=None, dest='path_out',
         help='The directory to save results, default: [cwd]')
-    parser.add_argument('-g', required=True, default='hg19', 
-        metavar='GENOME', choices=['dm3', 'hg19', 'hg38', 'mm10', 'mm9'],
+    parser.add_argument('-g', '--genome', required=True, default='hg19', 
+        choices=['dm3', 'hg19', 'hg38', 'mm10', 'mm9'],
         help='Reference genome : dm3, hg19, hg39, mm10, default: hg19')
-    parser.add_argument('-k', default=None, 
-        metavar='Spike-in', choices=[None, 'dm3', 'hg19', 'hg38', 'mm10'],
+    parser.add_argument('-k', '--spikein', default=None, 
+        choices=[None, 'dm3', 'hg19', 'hg38', 'mm10'],
         help='Spike-in genome : dm3, hg19, hg38, mm10, default: None')
-    parser.add_argument('-x', nargs='+', metavar='align_index',
+    parser.add_argument('-x', '--index_ext', nargs='+', dest='index_ext',
         help='Provide extra alignment index(es) for alignment, support multiple\
         indexes. eg. Transposon, tRNA, rRNA and so on.')
-    parser.add_argument('--gtf', required=True, 
+    parser.add_argument('--gtf', default=None,
         help='genome annotation file in GTF format, from ensembl')
     parser.add_argument('-A', metavar='Control_NAME', default=None,
         help='Name control samples')
-    parser.add_argument('-B', metavar='Control_NAME', default=None,
+    parser.add_argument('-B', metavar='Treatment_NAME', default=None,
         help='Name control samples')
-    parser.add_argument('-p', metavar='threads', type=int, default=8,
+    parser.add_argument('-p', '--threads', type=int, default=8,
         help='Number of threads to use, default: 8')
     parser.add_argument('-s', metavar='strandness', type=int,
         default=1, choices=[0, 1, 2],
@@ -174,7 +173,6 @@ def fc_run(gtf, bam, fout, strandness=0, threads=8, overwrite=False):
         fo.write(c1 + '\n')
 
     # run cmd
-    print(c1)
     if os.path.exists(fout) and overwrite is False:
         logging.info('file exists: %s' % fout)
         return fout
@@ -217,12 +215,18 @@ def map_stat(path):
 
 
 def main():
-    args = get_args()
-    if args.o is None:
-        args.o = str(pathlib.Path.cwd())
+    args = args_init(vars(get_args()), trim=False, align=True, call_peak=False) # save as dictionary
+    
+    # determine path_out
+    if args['path_out'] is None:
+        args['path_out'] = str(pathlib.Path.cwd())
+    
+    # determine gtf
+    if args['gtf'] is None:
+        args['gtf'] = Genome(args['genome']).gene_gtf('ensembl')
 
     # prep-dirs
-    prj_path = prepare_project(args.o)
+    project_path = prepare_project(args['path_out'])
 
     # path_out
     #    |-genome_mapping
@@ -232,79 +236,70 @@ def main():
     #    |-src
 
     ## mapping ##
+    args_map = args.copy()
+    tmp1 = args_map.pop('fq1', None) # remove 'fq1' from args
+    tmp2 = args_map.pop('path_out', None) # remove 'path_out' from args
+    tmp3 = args_map.pop('smp_name', None) # remove 'smp_name' form args
 
     # control
-    ctl_fqs = [f.name for f in args.a]
+    ctl_fqs = args['a']
     ctl_prefix = str_common([os.path.basename(f) for f in ctl_fqs])
     ctl_prefix = ctl_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
-    if args.A is None:
-        args.A = ctl_prefix
-    ctl_path = os.path.join(prj_path['genome_mapping'], args.A)
+    if args['A'] is None:
+        args['A'] = ctl_prefix
+    ctl_path = os.path.join(project_path['genome_mapping'], args['A'])
+    assert is_path(ctl_path)
     ctl_bam_files, ctl_bam_ext_files = Alignment(
-        fqs=ctl_fqs, 
-        path_out=ctl_path, 
-        smp_name=args.A,
-        genome=args.g,
-        spikein=args.k, 
-        index_ext=args.x,
-        threads=args.p,
-        unique_only=args.unique_only, 
-        aligner=args.aligner,
-        align_to_rRNA=args.align_to_rRNA,
-        path_data=args.path_data,
-        overwrite=args.overwrite).run()
+        fq1=ctl_fqs, path_out=ctl_path, smp_name=args['A'], **args_map).run()
 
     # treatment
-    tre_fqs = [f.name for f in args.b]
+    tre_fqs = args['b']
     tre_prefix = str_common([os.path.basename(f) for f in tre_fqs])
     tre_prefix = tre_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
-    if args.B is None:
-        args.B = tre_prefix
-    tre_path = os.path.join(prj_path['genome_mapping'], args.B)
+    if args['B'] is None:
+        args['B'] = tre_prefix
+    tre_path = os.path.join(project_path['genome_mapping'], args['B'])
+    assert is_path(tre_path)
     tre_bam_files, tre_bam_ext_files = Alignment(
-        fqs=tre_fqs, 
-        path_out=tre_path, 
-        smp_name=args.B,
-        genome=args.g,
-        spikein=args.k, 
-        index_ext=args.x,
-        threads=args.p,
-        unique_only=args.unique_only, 
-        aligner=args.aligner,
-        align_to_rRNA=args.align_to_rRNA,
-        path_data=args.path_data,
-        overwrite=args.overwrite).run()
-
-    # ## create bigWig files ##
+        fq1=tre_fqs, path_out=tre_path, smp_name=args['B'], **args_map).run()
+    
+    ## create bigWig files ##
     map_bam_files = ctl_bam_files + tre_bam_files
-    bw_path = prj_path['bigWig']
+    bw_path = project_path['bigWig']
     for bam in map_bam_files:
         bam2bigwig(
             bam=bam, 
-            genome=args.g, 
+            genome=args['genome'], 
             path_out=bw_path, 
-            strandness=args.s, 
-            binsize=args.bin_size, 
-            overwrite=args.overwrite)
+            strandness=args['s'], 
+            binsize=args['bin_size'],
+            overwrite=args['overwrite'])
 
     ## count ##
-    count_path = prj_path['count']
+    count_path = project_path['count']
     count_file = os.path.join(count_path, 'count.txt')
     # only kepp replicate samples
     map_bam_files = [f for f in map_bam_files if '_rep' in f]
-    count_file = fc_run(args.gtf, map_bam_files, count_file,
-        args.s, overwrite=args.overwrite)
+    count_file = fc_run(args['gtf'], map_bam_files, count_file,
+        args['s'], overwrite=args['overwrite'])
 
     # ## DE analysis ##
     # using R code #
     # de_run(args.A, args.B, count_file)
-    de_path = prj_path['de_analysis']
-    run_deseq2 = '/home/wangming/work/wmlib/hipipe/run_deseq2.R'
-    c1 = '/usr/bin/Rscript %s %s %s %s' % (run_deseq2, count_file, args.g, args.o)
-    subprocess.run(shlex.split(c1), stdout=subprocess.PIPE)
+    de_path = project_path['de_analysis']
+    # run_deseq2 = '/home/wangming/work/wmlib/hipipe/run_deseq2.R'
+    run_deseq2 = os.path.join(sys.path[0], 'run_deseq2.R')
+
+    if os.path.exists(run_deseq2):
+        Rscript_exe = which('Rscript')
+        c1 = '%s %s %s %s %s' % (Rscript_exe, run_deseq2, count_file, args['genome'], args['path_out'])
+        subprocess.run(shlex.split(c1), stdout=subprocess.PIPE)
+    else:
+        logging.error('file not exists, DESeq2 skipped - %s' % run_deseq2)
+
 
     ## mapping stat ##
-    map_stat_path = prj_path['report']
+    map_stat_path = project_path['report']
     map_stat_file = os.path.join(map_stat_path, 'mapping.stat')
     ctl_map = map_stat(ctl_path)
     tre_map = map_stat(tre_path)
@@ -316,9 +311,9 @@ def main():
     #########################
     ## Transposon analysis ##
     #########################
-    if args.g == 'dm3': # support dm3 TE analysis only
-        logging.info('## For Transposon analysis ##')
-        te_path = prj_path['transposon_analysis']
+    if args['genome'] == 'dm3': # support dm3 TE analysis only
+        logging.info('## Transposon analysis ##')
+        te_path = project_path['transposon_analysis']
         te_mapping_path = os.path.join(te_path, 'genome_mapping')
         assert is_path(te_mapping_path)
 
@@ -346,23 +341,36 @@ def main():
         te_count_path = os.path.join(te_path, 'count')
         assert is_path(te_count_path)
         te_count_file = os.path.join(te_count_path, 'count.txt')
-        # !!!!
-        te_gtf = '/home/data/genome/dm3/dm3_transposon/dm3.transposon.gtf'
+        # te_gtf = '/home/data/genome/dm3/dm3_transposon/dm3.transposon.gtf'
+        te_gtf = Genome(args['genome']).te()
+
+        print(te_gtf)
+        if te_gtf is None:
+            logging.error('file not exists, te_gtf - %s' % te_gtf)
+            return None # stop TE analysis
 
         # only kepp replicate samples
         te_map_bam_files = [f for f in te_map_bam_files if '_rep' in f]
         te_count_file = fc_run(te_gtf, te_map_bam_files, te_count_file,
-            args.s, overwrite=args.overwrite)
+            args['s'], overwrite=args['overwrite'])
 
-        # ## DE analysis ##
-        te_de_path = os.path.join(te_path, 'de_analysis')
-        run_deseq2 = '/home/wangming/work/wmlib/hipipe/run_deseq2.R'
-        c1 = '/usr/bin/Rscript %s %s %s %s' % (run_deseq2, te_count_file, args.g, te_path)
-        subprocess.run(shlex.split(c1))
+        # # ## DE analysis ##
+        # te_de_path = os.path.join(te_path, 'de_analysis')
+
+        ## get the R script
+        run_deseq2 = os.path.join(sys.path[0], 'run_deseq2.R')
+        if os.path.exists(run_deseq2):
+            Rscript_exe = which('Rscript')
+            # run_deseq2 = '/home/wangming/work/wmlib/hipipe/run_deseq2.R'
+            c1 = '%s %s %s %s %s' % (Rscript_exe, run_deseq2, te_count_file, args['genome'], te_path)
+            subprocess.run(shlex.split(c1))
+        else:
+            logging.error('file not exists, DESeq2 skipped - %s' % run_deseq2)
 
         ## mapping stat ##
         te_stat_path = os.path.join(te_path, 'report')
-        # map_stat_path = prj_path['report']
+        assert is_path(te_stat_path)
+        # map_stat_path = project_path['report']
         te_stat_file = os.path.join(te_stat_path, 'mapping.stat')
         te_ctl_map = map_stat(te_ctl_path)
         te_tre_map = map_stat(te_tre_path)
