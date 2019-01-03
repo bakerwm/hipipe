@@ -1,5 +1,7 @@
-#!/usr/bin/env python
-
+#!/usr/bin/env python3
+"""Demultiplexing Illumina SE and PE reads
+optional: p7, barcode, both
+"""
 
 __author__ = 'Ming Wang'
 __email__ = 'wangm08@hotmail.com'
@@ -7,13 +9,75 @@ __date__ = '2018-12-25'
 __version__ = '0.3'
 
 
-import os, sys
-import gzip, binascii, json
+import os
+import sys
+import gzip
+import pickle
+import logging
+import binascii
+import json
+from arguments import args_init
 
 
 def is_gz(filepath):
     with open(filepath, 'rb') as test_f:
         return binascii.hexlify(test_f.read(2)) == b'1f8b'
+
+
+def is_path(path, create = True):
+    """
+    Check path, whether a directory or not
+    if not, create it
+    """
+    assert isinstance(path, str)
+    if os.path.exists(path):
+        return True
+    else:
+        if create:
+            try:
+                os.makedirs(path)
+                return True
+            except IOError:
+                logging.error('failed to create directories: %s' % path)
+        else:
+            return False
+
+
+def args_checker(d, x, update=False):
+    """Check if dict and x are consitent"""
+    assert isinstance(d, dict)
+    flag = None
+    if os.path.exists(x):
+        # read file to dict
+        with open(x, 'rb') as fi:
+            d_checker = pickle.load(fi)
+        if d == d_checker:
+            flag = True
+        else:
+            if update:
+                with open(x, 'wb') as fo:
+                    pickle.dump(d, fo, protocol=pickle.HIGHEST_PROTOCOL)
+    elif isinstance(x, str):
+        # save dict to new file
+        with open(x, 'wb') as fo:
+            pickle.dump(d, fo, protocol=pickle.HIGHEST_PROTOCOL)
+    else:
+        logging.error('illegal x= argument: %s' % x)
+    return flag
+
+
+def args_logger(d, x, overwrite=False):
+    """Format dict, save to file
+        key: value
+    """
+    assert isinstance(d, dict)
+    n = ['%20s : %-40s' % (k, d[k]) for k in list(d.keys())]
+    if os.path.exists(x) and overwrite is False:
+        return True
+    else:
+        with open(x, 'wt') as fo:
+            fo.write('\n'.join(n) + '\n')
+        return '\n'.join(n)
 
 
 class Json_file(object):
@@ -90,29 +154,16 @@ class Demx(object):
 
     """
 
-    def __init__(self, fq1, sample_info, path_out, **kwargs):
-        self.fq1 = fq1
-        self.sample_info = sample_info
-        self.path_out = path_out
-        self.kwargs = kwargs
-        if not os.path.exists(path_out):
-            os.makedirs(path_out)
-        # wrap args
-        self.args = self._args_init()
+    def __init__(self, fq1, sample_info, path_out, demx_type='p7', **kwargs):
+        args1 = args_init(kwargs, demx=True, trim=False, align=False, call_peak=False)
+        args2 = {
+            'fq1': fq1,
+            'sample_info': sample_info,
+            'path_out': path_out,
+            'demx_type': demx_type}
+        self.kwargs = {**args1, **args2}
 
-
-    def _args_init(self):
-        args = self.kwargs
-        args['fq1'] = self.fq1
-        args['sample_info'] = self.sample_info
-        args['path_out'] = self.path_out
-        args['fq2'] = args.get('fq2', None)
-        args['n_mismatch'] = args.get('n_mismatch', 0)
-        args['bc_in_read'] = args.get('bc_in_read', 1)
-        args['n_left'] = args.get('n_left', 0)
-        args['n_right'] = args.get('n_right', 0)
-        args['cut'] = args.get('cut', False)
-        return args
+        assert is_path(path_out)
 
 
     def key_len(self, d):
@@ -152,7 +203,8 @@ class Demx(object):
         3. bc-2 ...
 
         """
-        x = self.sample_info
+        args = self.kwargs.copy()
+        x = args['sample_info']
 
         # read file
         idx = []
@@ -311,11 +363,11 @@ class Demx(object):
         : arg path_out, the directory to save demultiplexed fastq files
         : arg mm, maximum mismatch allowed
         """
-        args = self.args
+        args = self.kwargs.copy()
         fq1 = args['fq1']
         fq2 = args['fq2']
-        sample_info = self.sample_info
-        path_out = self.path_out
+        sample_info = args['sample_info']
+        path_out = args['path_out']
         mm = args['n_mismatch']
 
         p7_dict = self.index_to_dict(sample_info, col_key=1, col_val=3)
@@ -324,6 +376,16 @@ class Demx(object):
             raise ValueError('Empty sampleinfo or the length of P7-index are not consistent: %s' % sample_info)
         p7_dict['undemx'] = 'undemx' # undemx file
         # p7_dict['multi'] = 'multi' # barcode match multi hits
+
+        ## save log
+        args['sub-command'] = 'p7_demx_pe'
+        args_file = os.path.join(path_out, 'arguments.txt')
+        args_pickle = os.path.join(path_out, 'arguments.pickle')
+        if args_checker(args, args_pickle) and args['overwrite'] is False:
+            logging.info('files exists, arguments not changed, demx skipped - %s' % sample_info)
+            return True
+        else:
+            args_logger(args, args_file, overwrite=True) # update arguments.txt
 
         ####################
         ## prepare read12 ##
@@ -375,11 +437,7 @@ class Demx(object):
             p7_writer[idx][0].close() # close writers
             p7_writer[idx][1].close() # close writers
         
-        ## save log
-        lib = os.path.join(path_out, 'run_args.lib')
-        args['sub-command'] = 'p7_demx_pe'
-        Json_file(args).json_writer(to=lib)
-
+        # save read counts
         report_file = os.path.join(path_out, 'report_demx.json')
         Json_file(p7_count).json_writer(report_file)
 
@@ -391,10 +449,10 @@ class Demx(object):
         : arg path_out, the directory to save demultiplexed fastq files
         : arg mm, maximum mismatch allowed
         """
-        args = self.args
+        args = self.kwargs.copy()
         fq1 = args['fq1']
-        sample_info = self.sample_info
-        path_out = self.path_out
+        sample_info = args['sample_info']
+        path_out = args['path_out']
         mm = args['n_mismatch']
 
         p7_dict = self.index_to_dict(sample_info, col_key=1, col_val=3)
@@ -403,6 +461,16 @@ class Demx(object):
             raise ValueError('Empty sampleinfo or the length of P7-index are not consistent: %s' % sample_info)
         p7_dict['undemx'] = 'undemx' # undemx file
         # p7_dict['multi'] = 'multi' # barcode match multi hits
+
+        ## save log
+        args['sub-command'] = 'p7_demx_se'
+        args_file = os.path.join(path_out, 'arguments.txt')
+        args_pickle = os.path.join(path_out, 'arguments.pickle')
+        if args_checker(args, args_pickle) and args['overwrite'] is False:
+            logging.info('files exists, arguments not changed, demx skipped - %s' % sample_info)
+            return True
+        else:
+            args_logger(args, args_file, overwrite=True) # update arguments.txt
 
         ####################
         ## prepare writer ##
@@ -436,11 +504,7 @@ class Demx(object):
         for idx in p7_writer: 
             p7_writer[idx].close() # close writers
 
-        ## save log
-        lib = os.path.join(path_out, 'run_args.lib')
-        args['sub-command'] = 'p7_demx_se'
-        Json_file(args).json_writer(to=lib)
-
+        # save read counts
         report_file = os.path.join(path_out, 'report_demx.json')
         Json_file(p7_count).json_writer(report_file)
 
@@ -453,19 +517,19 @@ class Demx(object):
         : arg path_out, the directory to save demultiplexed fastq files
         : arg mm, maximum mismatch allowed
         : arg bc_in_read, barcode in read1 or read2, default: 1
-        : arg n_left, number of bases in the left of barcode
-        : arg n_right, number of bases in the right of barcode
+        : arg bc_n_left, number of bases in the left of barcode
+        : arg bc_n_right, number of bases in the right of barcode
         : arg cut, cut the barcode and ramdomer from sequence
         """
-        args = self.args
+        args = self.kwargs.copy()
         fq1 = args['fq1']
         fq2 = args['fq2']
-        sample_info = self.sample_info
-        path_out = self.path_out
+        sample_info = args['sample_info']
+        path_out = args['path_out']
         mm = args['n_mismatch']
         bc_in_read = args['bc_in_read']
-        n_left = args['n_left']
-        n_right = args['n_right']
+        bc_n_left = args['bc_n_left']
+        bc_n_right = args['bc_n_right']
         cut = args['cut']
 
         bc_dict = self.index_to_dict(sample_info, col_key=2, col_val=3)
@@ -474,6 +538,16 @@ class Demx(object):
             raise Exception('Empty sampleinfo or length of barcodes are not consistent: %s' % sample_info)
         bc_dict['undemx'] = 'undemx' # add undemx
         # bc_dict['multi'] = 'multi' # barcode match multi hits
+
+        ## save log
+        args['sub-command'] = 'bc_demx_pe'
+        args_file = os.path.join(path_out, 'arguments.txt')
+        args_pickle = os.path.join(path_out, 'arguments.pickle')
+        if args_checker(args, args_pickle) and args['overwrite'] is False:
+            logging.info('files exists, arguments not changed, demx skipped - %s' % args['sample_info'])
+            return True
+        else:
+            args_logger(args, args_file, overwrite=True) # update arguments.txt
 
         ####################
         ## prepare read12 ##
@@ -516,7 +590,7 @@ class Demx(object):
                             %s \n %s' % (s1[0], s2[0]))
                     # default bc in s1
                     s1_new, bc_query = self.barcode_extractor(s1, cut=False, 
-                        bc_len=bc_len, bc_n_left=n_left, bc_n_right=n_right)
+                        bc_len=bc_len, bc_n_left=bc_n_left, bc_n_right=bc_n_right)
                     tag = self.str_validator(bc_query, bc_dict, mm=mm)
                     # write fastq
                     bc_writer[tag][0].write('\n'.join(s1_new) + '\n')
@@ -529,23 +603,109 @@ class Demx(object):
             bc_writer[bc][0].close() # close writers
             bc_writer[bc][1].close() # close writers
 
-        ## save log
-        lib = os.path.join(path_out, 'run_args.lib')
-        args['sub-command'] = 'bc_demx_pe'
-        Json_file(args).json_writer(to=lib)
-
+        ## save read counts
         report_file = os.path.join(path_out, 'report_demx.json')
         Json_file(bc_count).json_writer(report_file)
 
 
-# fq1 = 'data/raw_data/demo_01m_1.fq.gz'
-# fq2 = 'data/raw_data/demo_01m_2.fq.gz'
-# sample_info = 'data/sample_info/samplesheet.txt'
-# path_out = 'results/demo'
+    def bc_demx_se(self):
+        """barcode demultiplex for SE read"""
+        pass
 
-# Demx(fq1=fq1, fq2=fq2, sample_info=sample_info, path_out=path_out,
-#     n_mismatch=2).p7_demx_pe()
 
-# Demx(fq1=fq1, fq2=fq2, sample_info=sample_info, path_out=path_out,
-#     n_mismatch=2).p7_demx_se()
+    def run(self):
+        """Run demx"""
+        args = self.kwargs.copy()
 
+        #####################
+        ## both p7 and bc  ##
+        #####################
+        if args['demx_type'] == 'both':
+            # split p7 and barcode
+            index_list = self.sampleinfo_spliter() # [p7_list, bc_list1, bc_list2, ...]
+            p7_list = index_list[0] # p7_list
+            index_list.remove(p7_list)
+            bc_list = index_list[0] # bc_list
+
+            #####################
+            ## run p7 1st      ##
+            #####################
+            logging.info('Demultiplexing: P7-index')
+            path_p7 = os.path.join(args['path_out'], 'p7_index')
+            assert is_path(path_p7)
+            p7_info_file = os.path.join(path_p7, 'p7_sampleinfo.txt')
+            with open(p7_info_file, 'wt') as fo:
+                fo.write('\n'.join(p7_list) + '\n')
+
+            self.kwargs['path_out'] = path_p7
+            self.kwargs['sample_info'] = p7_info_file # update sample info
+            if args['fq2'] is None:
+                logging.info('SE mode')
+                self.p7_demx_se()
+            else:
+                logging.info('PE mode')
+                self.p7_demx_pe()
+            
+            #####################
+            ## run barcode 2nd ##
+            #####################
+            for bc_sublist in bc_list:
+                if len(bc_sublist) == 0:
+                    continue
+                p7, bc, name = bc_sublist[0].split('\t')
+                path_bc = os.path.join(args['path_out'], 'barcode_%s' % p7)
+                assert is_path(path_bc)
+                bc_info_file = os.path.join(path_bc, 'barcode_sampleinfo.txt')
+                with open(bc_info_file, 'wt') as fo:
+                    fo.write('\n'.join(bc_sublist) + '\n')
+
+                self.kwargs['path_out'] = path_bc
+                self.kwargs['sample_info'] = bc_info_file
+                ## update fq1, fq2, sample_info
+                logging.info('Demultiplexing: barcode, %s' % p7)
+                bc_fq2 = os.path.join(path_p7, p7 + '_2.fq.gz')
+
+                ## PE mode
+                if os.path.exists(bc_fq2):
+                    logging.info('PE mode')
+                    self.kwargs['fq1'] = os.path.join(path_p7, p7 + '_1.fq.gz')
+                    self.kwargs['fq2'] = bc_fq2
+                    self.bc_demx_pe()
+
+                ## SE mode
+                else:
+                    logging.info('SE mode')
+                    self.kwargs['fq1'] = os.path.join(path_p7, p7 + '.fq.gz')
+                    self.kwargs['fq2'] = None
+                    self.bc_demx_se()
+
+        ###################
+        ## both p7 only  ##
+        ###################
+        elif args['demx_type'] == 'p7':
+            logging.info('Demultiplexing: P7-index')
+            if args['fq2'] is None:
+                logging.info('SE mode')
+                self.p7_demx_se()
+            else:
+                logging.info('PE mode')
+                self.p7_demx_pe()
+                
+        ########################
+        ## both barcode only  ##
+        ########################
+        elif args['demx_type'] == 'barcode':
+            logging.info('Demultiplexing: barcode')
+            if args['fq2'] is None:
+                logging.info('SE mode')
+                self.bc_demx_se()
+            else:
+                logging.info('PE mode')
+                self.bc_demx_pe()
+
+        ## unknown type
+        else:
+            raise Exception('either --demx-p7 or --demx-barcode is required')
+
+
+## EOF
