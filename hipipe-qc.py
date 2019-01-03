@@ -26,9 +26,9 @@ def get_args():
     """
     parser = argparse.ArgumentParser(prog='aligner', 
                                      description='mapping reads')
-    parser.add_argument('-i', nargs='+', required=True, metavar='INPUT', 
+    parser.add_argument('-i', '--input', nargs='+', required=True, 
         help='fastq files or directories contain fastq files')
-    parser.add_argument('-o', default=None, 
+    parser.add_argument('-o', '--output', default=None, 
         metavar='OUTPUT',  help='The directory to save results, default, \
         current working directory.')
     args = parser.parse_args()
@@ -51,14 +51,18 @@ def get_fq_files(x):
     fastq file format:
     *.fq, *.fastq, *.fq.gz, *.fastq.gz
     """
+    fq_files = []
     if os.path.isdir(x):
-        f1 = findfiles("*.f[astq]*[.gz]*", "data/clean_data/")
+        # f1 = findfiles("*.f[astq]*[.gz]*", x)
+        fq_files = findfiles("*.f[astq]*", x)
     elif os.path.isfile(x):
-        f1 = [x]
+        # f1 = [x]
+        fq_files = [x]
     else:
-        f1 = None
+        # f1 = None
+        fq_files = None
 
-    return f1
+    return fq_files
 
 
 def run_shell_cmd(cmd): 
@@ -103,20 +107,20 @@ def main():
 
     fq_files = []
     # list fastq files
-    for x in args.i:
+    for x in args.input:
         q1 = get_fq_files(x)
         fq_files.extend(q1)
 
-    if not os.path.exists(args.o):
-        os.makedirs(args.o)
+    if not os.path.exists(args.output):
+        os.makedirs(args.output)
 
     # check fastqc output
-    fq_files = check_fastqc(args.o, fq_files, overwrite=False)
+    fq_files = check_fastqc(args.output, fq_files, overwrite=False)
     
     # run fastqc
     logging.info('running FastQC')
     fq_list = ' '.join(fq_files)
-    cmd1 = 'fastqc -o %s %s' % (args.o, fq_list)
+    cmd1 = 'fastqc -o %s %s' % (args.output, fq_list)
     if len(fq_files) > 0:
         run_shell_cmd(cmd1)
 
@@ -125,8 +129,8 @@ def main():
     main_script = os.path.realpath(__file__)
     home = os.path.dirname(main_script)
     report_r = os.path.join(home, 'qc_report.R')
-    report_html = os.path.join(args.o, 'report.html')
-    cmd2 = 'Rscript %s %s' % (report_r, args.o)
+    report_html = os.path.join(args.output, 'report.html')
+    cmd2 = 'Rscript %s %s' % (report_r, args.output)
     if not os.path.exists(report_html):
         run_shell_cmd(cmd2)
 
