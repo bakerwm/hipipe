@@ -3,6 +3,10 @@
 Create fastqc report for multiple fastq files
 """
 
+__author__ = 'Ming Wang'
+__email__ = 'wangm08@hotmail.com'
+__date__ = '2018-12-25'
+__version__ = '0.2'
 
 import os
 import re
@@ -86,7 +90,7 @@ def check_fastqc(path, fqs, overwrite=False):
         f1 = os.path.join(path, prefix + '_fastqc.html')
         f2 = os.path.join(path, prefix + '_fastqc.zip')
         if os.path.exists(f1) and os.path.exists(f2) and overwrite is False:
-            logging.info('file exists, fastqc sipped - %s' % prefix)
+            logging.info('file exists, fastqc skipped - %s' % prefix)
             continue
         else:
             fq_tmp.append(fq)
