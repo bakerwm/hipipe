@@ -3,7 +3,7 @@
 Prepare arguments for goldclip pipeline
 """
 
-def args_init(args=None, trim=True, align=True, call_peak=True):
+def args_init(args=None, demx=False, trim=True, align=True, call_peak=False):
         """Inititate the arguments, assign the default values to arg
         positional arg: smp, genome
         """
@@ -23,6 +23,14 @@ def args_init(args=None, trim=True, align=True, call_peak=True):
         args['overwrite'] = args.get('overwrite', False)
         args['threads'] = args.get('threads', 8)
 
+        ## demx
+        if demx:
+            args['demx_type'] = args.get('demx_type', 'p7') # p7, barcode, both
+            args['n_mismatch'] = args.get('n_mismatch', 0)
+            args['bc_n_left'] = args.get('bc_n_left', 3)
+            args['bc_n_right'] = args.get('bc_n_right', 2)
+            args['bc_in_read'] = args.get('bc_in_read', 1)
+            args['cut'] = args.get('cut', False)
 
         ## trimming
         if trim:
