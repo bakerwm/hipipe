@@ -412,7 +412,10 @@ class Alignment(object):
         """
         args = self.kwargs.copy()
 
-        if not align_path:
+        fq_prefix = file_prefix(fq)[0]
+        fq_prefix = re.sub('\.clean|\.nodup|\.cut', '', fq_prefix)
+
+        if align_path is None:
             align_path = args['path_out']
 
         # define aligner
@@ -431,13 +434,17 @@ class Alignment(object):
 
         for ext in args['index_ext']:
             if index_validator(ext, args['aligner']):
+                print(ext)
+                ext_order = args['index_ext'].index(ext) # number
+                fq_path = os.path.join(align_path, 'extra_mapping_' + str(ext_order), fq_prefix)
+                assert is_path(fq_path)
                 reference = os.path.basename(ext)
                 bam_ext, unmap_ext = aligner_exe(
                     fq=fq, 
                     index=ext, 
                     reference=reference, 
                     unique_map=True, 
-                    align_path=align_path)
+                    align_path=fq_path)
             else:
                 bam_ext = None
             bam_ext_list.append(bam_ext)
@@ -457,13 +464,13 @@ class Alignment(object):
 
         # run alignment for replicates
         for fq in args['fq1']:
-            logging.info('alignment: %s' % fq)
+            # logging.info('alignment: %s' % fq)
             fq_prefix = file_prefix(fq)[0]
             fq_prefix = re.sub('\.clean|\.nodup|\.cut', '', fq_prefix)
-            fq_path = os.path.join(args['path_out'], 'extra_mapping', fq_prefix)
-            assert is_path(fq_path)
+            # fq_path = os.path.join(args['path_out'], 'extra_mapping', fq_prefix)
+            # assert is_path(fq_path)
             logging.info('align to index_ext: %s' % fq_prefix)
-            bam_files = self.align_extra(fq, fq_path)
+            bam_files = self.align_extra(fq)
             bam_out.append(bam_files) #
             # stat alignment
             Alignment_stat(fq_path).saveas()
@@ -569,6 +576,7 @@ class Alignment(object):
         if not args['index_ext'] is None:
             ext_bam_files = self.run_extra()
         
+        print(args)
         return [genome_bam_files, ext_bam_files]
 
 
