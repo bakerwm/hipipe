@@ -317,8 +317,8 @@ def main():
         te_mapping_path = os.path.join(te_path, 'genome_mapping')
         assert is_path(te_mapping_path)
 
-        te_ctl_path = os.path.join(ctl_path, 'extra_mapping')
-        te_tre_path = os.path.join(tre_path, 'extra_mapping')
+        te_ctl_path = os.path.join(ctl_path, 'extra_mapping_0')
+        te_tre_path = os.path.join(tre_path, 'extra_mapping_0')
        
         ## TE mapping
         te_map_bam_files = ctl_bam_ext_files + tre_bam_ext_files
