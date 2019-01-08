@@ -106,7 +106,6 @@ def get_args():
     return args
 
 
-
 def prepare_project(path):
     """Prepare subdirs for project"""
     # assert os.path.isdir(path)
@@ -122,7 +121,6 @@ def prepare_project(path):
     return prj_dict
 
 
-
 def _is_bam_indexed(bam, overwrite=False):
     """Check if *.bai file exists"""
     bai = bam + '.bai'
@@ -134,7 +132,6 @@ def _is_bam_indexed(bam, overwrite=False):
             return True
         else:
             return False
-
 
 
 def fc_run(gtf, bam, fout, strandness=0, threads=8, overwrite=False):
@@ -186,7 +183,6 @@ def fc_run(gtf, bam, fout, strandness=0, threads=8, overwrite=False):
             raise ValueError('featureCounts error: %s' % fout)
 
 
-
 def map_stat(path):
     """Stat mapping reads for each replicate
     and merge files
@@ -204,8 +200,10 @@ def map_stat(path):
       |    |-rep2
     """
     path_dirs = [os.path.join(path, f) for f in os.listdir(path)]
-    path_dirs = [f for f in path_dirs if os.path.isdir(f)]
+    ## exclude extra_mapping
+    path_dirs = [f for f in path_dirs if os.path.isdir(f) and not os.path.basename(f).startswith('extra_mapping')]
     frames = [Alignment_stat(f).stat for f in path_dirs]
+
     frames = [f for f in frames if isinstance(f, pd.DataFrame)]
     if len(frames) > 0:
         df = pd.concat(frames, axis=0)
@@ -285,9 +283,7 @@ def main():
 
     # ## DE analysis ##
     # using R code #
-    # de_run(args.A, args.B, count_file)
     de_path = project_path['de_analysis']
-    # run_deseq2 = '/home/wangming/work/wmlib/hipipe/run_deseq2.R'
     run_deseq2 = os.path.join(sys.path[0], 'run_deseq2.R')
 
     if os.path.exists(run_deseq2):
@@ -304,7 +300,7 @@ def main():
     ctl_map = map_stat(ctl_path)
     tre_map = map_stat(tre_path)
     df_map = pd.concat([ctl_map, tre_map], axis=0).reset_index()
-    df_map = df_map.sort_values(['index'])
+    df_map = df_map.sort_values(['index']).reset_index()
     print(df_map)
     df_map.to_csv(map_stat_file, sep='\t', header=True, index=False)
 
@@ -317,8 +313,8 @@ def main():
         te_mapping_path = os.path.join(te_path, 'genome_mapping')
         assert is_path(te_mapping_path)
 
-        te_ctl_path = os.path.join(ctl_path, 'extra_mapping_0')
-        te_tre_path = os.path.join(tre_path, 'extra_mapping_0')
+        te_ctl_path = os.path.join(ctl_path, 'extra_mapping_ext1')
+        te_tre_path = os.path.join(tre_path, 'extra_mapping_ext1')
        
         ## TE mapping
         te_map_bam_files = ctl_bam_ext_files + tre_bam_ext_files
@@ -330,12 +326,12 @@ def main():
         assert is_path(te_bw_path)
         # for bam in te_map_bam_files:
         #     bam2bigwig(
-        #         bam=bam, 
-        #         genome=args.g, 
-        #         path_out=bw_path, 
-        #         strandness=args.s, 
-        #         binsize=args.bin_size, 
-        #         overwrite=args.overwrite)
+        #     bam=bam, 
+        #     genome=args.g, 
+        #     path_out=bw_path, 
+        #     strandness=args.s, 
+        #     binsize=args.bin_size, 
+        #     overwrite=args.overwrite)
 
         ## count ##
         te_count_path = os.path.join(te_path, 'count')
@@ -355,13 +351,10 @@ def main():
             args['s'], overwrite=args['overwrite'])
 
         # # ## DE analysis ##
-        # te_de_path = os.path.join(te_path, 'de_analysis')
-
-        ## get the R script
+        # using R code #
         run_deseq2 = os.path.join(sys.path[0], 'run_deseq2.R')
         if os.path.exists(run_deseq2):
             Rscript_exe = which('Rscript')
-            # run_deseq2 = '/home/wangming/work/wmlib/hipipe/run_deseq2.R'
             c1 = '%s %s %s %s %s' % (Rscript_exe, run_deseq2, te_count_file, args['genome'], te_path)
             subprocess.run(shlex.split(c1))
         else:
@@ -375,7 +368,7 @@ def main():
         te_ctl_map = map_stat(te_ctl_path)
         te_tre_map = map_stat(te_tre_path)
         df_map = pd.concat([te_ctl_map, te_tre_map], axis=0).reset_index()
-        df_map = df_map.sort_values(['index'])
+        df_map = df_map.sort_values(['index']).reset_index()
         print(df_map)
         df_map.to_csv(te_stat_file, sep='\t', header=True, index=False)
 
