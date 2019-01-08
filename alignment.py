@@ -405,15 +405,12 @@ class Alignment(object):
         return bam_files
 
 
-    def align_extra(self, fq, align_path=None):
+    def align_extra(self, fq, index, reference, align_path=None):
         """Align reads to extra index
         such as GFP, white, firefly, transposon
         return bam_files
         """
         args = self.kwargs.copy()
-
-        fq_prefix = file_prefix(fq)[0]
-        fq_prefix = re.sub('\.clean|\.nodup|\.cut', '', fq_prefix)
 
         if align_path is None:
             align_path = args['path_out']
@@ -425,34 +422,22 @@ class Alignment(object):
             'STAR': self.star_se}
 
         aligner_exe = aligner_dict.get(args['aligner'], None) # determine aligner
+
         if not aligner_exe:
             raise ValueError('unknown aligner: %s' % args['aligner'])
 
-        # get all index in order
-        # index_ext = args['index_ext']
-        bam_ext_list = []
-
-        for ext in args['index_ext']:
-            if index_validator(ext, args['aligner']):
-                print(ext)
-                ext_order = args['index_ext'].index(ext) # number
-                fq_path = os.path.join(align_path, 'extra_mapping_' + str(ext_order), fq_prefix)
-                assert is_path(fq_path)
-                reference = os.path.basename(ext)
-                bam_ext, unmap_ext = aligner_exe(
-                    fq=fq, 
-                    index=ext, 
-                    reference=reference, 
-                    unique_map=True, 
-                    align_path=fq_path)
-            else:
-                bam_ext = None
-            bam_ext_list.append(bam_ext)
-        return bam_ext_list
+        bam_ext, unmap_ext = aligner_exe(
+            fq=fq, 
+            index=index, 
+            reference=reference, 
+            unique_map=True, 
+            align_path=align_path)
+        Alignment_stat(align_path).saveas()
+        return [bam_ext, unmap_ext]
 
 
-    def run_extra(self):
-        """Run the alignment for specific fastq file onto extra index
+    def align_extra_batch(self, fq, align_path=None):
+        """Run the alignment for specific fastq file onto extra index (multiple)
         1. run alignment for each replicate
         2. merge replicates
         3. run log parser, in json format
@@ -460,39 +445,62 @@ class Alignment(object):
         """
         args = self.kwargs.copy()
 
-        bam_out = []
+        fq_prefix = file_prefix(fq)[0]
+        fq_prefix = re.sub('\.clean|\.nodup|\.cut', '', fq_prefix)
+
+        if align_path is None:
+            align_path = args['path_out']
+
+        aligner = args.get('aligner', None)
+
+        bam_ext_list = []
+        for ext in args['index_ext']:
+            if index_validator(ext, args['aligner']):
+                reference = 'ext%s' % str(args['index_ext'].index(ext) + 1)
+                fq_path = os.path.join(align_path, 'extra_mapping_' + reference, fq_prefix)
+                assert is_path(fq_path)
+                bam_ext, _ = self.align_extra(fq=fq, index=ext, reference=reference, align_path=fq_path)
+            else:
+                bam_ext = None
+            bam_ext_list.append(bam_ext)
+
+        return bam_ext_list
+
+
+    def align_extra_all(self):
+        """Align fastq files to all extra index
+        1. alignment for each replicate
+        2. merge replicate
+        3. organize log files, save in report
+        """
+        args = self.kwargs.copy()
 
         # run alignment for replicates
+        bam_out = []
         for fq in args['fq1']:
-            # logging.info('alignment: %s' % fq)
-            fq_prefix = file_prefix(fq)[0]
-            fq_prefix = re.sub('\.clean|\.nodup|\.cut', '', fq_prefix)
-            # fq_path = os.path.join(args['path_out'], 'extra_mapping', fq_prefix)
-            # assert is_path(fq_path)
-            logging.info('align to index_ext: %s' % fq_prefix)
-            bam_files = self.align_extra(fq)
-            bam_out.append(bam_files) #
-            # stat alignment
-            Alignment_stat(fq_path).saveas()
+            logging.info('alignment index_ext: %s' % fq)
+            bam_ext_files = self.align_extra_batch(fq)
+            bam_out.append(bam_ext_files) #
 
         # merge bam files
-        if args['merge_rep']: 
-            merged_path = os.path.join(args['path_out'], 'extra_mapping', args['smp_name'])
+        if args['merge_rep']:
             merged_files = []
             if len(bam_out) > 1: # for multiple bam files
-                assert is_path(merged_path)
                 for i in range(len(bam_out[0])):
                     rep_bam_files = [b[i] for b in bam_out]
                     merged_suffix = str_common(rep_bam_files, suffix=True)
                     merged_suffix = re.sub('^_[12]|_R[12]', '', merged_suffix)
                     merged_bam_name = args['smp_name'] + merged_suffix
+                    merged_path = os.path.join(os.path.dirname(os.path.dirname(rep_bam_files[0])), args['smp_name'])
                     merged_bam_file =  os.path.join(merged_path, merged_bam_name)
+                    assert is_path(merged_path)
                     if os.path.exists(merged_bam_file) and args['overwrite'] is False:
                         logging.info('bam file exists: %s' % merged_bam_file)
                     else:
                         tmp = bam_merge(rep_bam_files, merged_bam_file)
+                    print(merged_bam_file)
                     merged_files.append(merged_bam_file)
-                Alignment_stat(merged_path).saveas()
+                    Alignment_stat(merged_path).saveas()
                 bam_out.append(merged_files)
 
         return bam_out
@@ -574,9 +582,8 @@ class Alignment(object):
         # run extra index mapping
         ext_bam_files = None
         if not args['index_ext'] is None:
-            ext_bam_files = self.run_extra()
+            ext_bam_files = self.align_extra_all()
         
-        print(args)
         return [genome_bam_files, ext_bam_files]
 
 
