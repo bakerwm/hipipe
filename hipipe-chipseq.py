@@ -335,7 +335,6 @@ def chipseq_genome():
     # return [ctl_bam_files, tre_bam_files]
 
 
-
 def main():
     chipseq_genome()
     # chipseq_te()

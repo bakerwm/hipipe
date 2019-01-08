@@ -281,8 +281,8 @@ def main():
     count_file = fc_run(args['gtf'], map_bam_files, count_file,
         args['s'], overwrite=args['overwrite'])
 
-    # ## DE analysis ##
-    # using R code #
+    ## DE analysis ##
+    ## using R code #
     de_path = project_path['de_analysis']
     run_deseq2 = os.path.join(sys.path[0], 'run_deseq2.R')
 
@@ -300,7 +300,7 @@ def main():
     ctl_map = map_stat(ctl_path)
     tre_map = map_stat(tre_path)
     df_map = pd.concat([ctl_map, tre_map], axis=0).reset_index()
-    df_map = df_map.sort_values(['index']).reset_index()
+    df_map = df_map.sort_values(['index'])
     print(df_map)
     df_map.to_csv(map_stat_file, sep='\t', header=True, index=False)
 
@@ -350,8 +350,8 @@ def main():
         te_count_file = fc_run(te_gtf, te_map_bam_files, te_count_file,
             args['s'], overwrite=args['overwrite'])
 
-        # # ## DE analysis ##
-        # using R code #
+        ## DE analysis ##
+        ## using R code #
         run_deseq2 = os.path.join(sys.path[0], 'run_deseq2.R')
         if os.path.exists(run_deseq2):
             Rscript_exe = which('Rscript')
@@ -368,7 +368,7 @@ def main():
         te_ctl_map = map_stat(te_ctl_path)
         te_tre_map = map_stat(te_tre_path)
         df_map = pd.concat([te_ctl_map, te_tre_map], axis=0).reset_index()
-        df_map = df_map.sort_values(['index']).reset_index()
+        df_map = df_map.sort_values(['index'])
         print(df_map)
         df_map.to_csv(te_stat_file, sep='\t', header=True, index=False)
 
