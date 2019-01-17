@@ -1,0 +1,55 @@
+---
+title: "Alignment Statistics"
+author: "Ming Wang"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: hpstr
+    toc: true
+    toc_depth: 2
+    highlight: haddock
+    df_print: paged
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r global_options, include=FALSE}
+library(goldclipReport)
+library(knitr)
+library(ggplot2)
+library(dplyr)
+
+knitr::opts_chunk$set(fig.width = 12, 
+                      fig.height = 8, 
+                      fig.path = 'Figures',
+                      echo = FALSE,
+                      cache = FALSE,
+                      prompt = FALSE,
+                      tidy = FALSE,
+                      comment = NA,
+                      message = FALSE,
+                      warning = FALSE,
+                      rownames.print = FALSE)
+```
+
+## Alignment Statistics
+
+```{r map_stat1, eval = TRUE, echo = FALSE, fig.width = 8}
+## for count table
+df_stat <- map_stat_read(stat_files, origin = TRUE)
+df_stat
+```
+
+Note:    
+**rRNA**, **unique**, **multiple**, map to reference genome
+**rRNA.sp**, **unique.sp**, **multiple.sp** map to spike-in genome
+**unmap**, does not map to any given sequences
+
+
+```{r map_plot, fig.width = 8}
+df_plot <- map_stat_plot(stat_files, stat = "percentage")
+print(df_plot)
+```
+
