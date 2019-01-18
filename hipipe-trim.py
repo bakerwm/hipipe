@@ -53,7 +53,10 @@ def get_args():
         help='reads in FASTQ files, support (*.gz), 1-4 files.')
     parser.add_argument('-a', '--adapter3',  default='AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC', 
         metavar='adapter', type=str,
-        help='3-Adapter, default: [AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC].')
+        help='3-Adapter, \
+        TruSeq RNAseq: AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC \
+        TruSeq smallRNA: TGGAATTCTCGGGTGCCAAGG \
+        Nextera: CTGTCTCTTATACACATCT')
     parser.add_argument('-o', '--path_out', default=None, 
         help='The directory to save results.')
     parser.add_argument('-g', '--adapter5', default='',
