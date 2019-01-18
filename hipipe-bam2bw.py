@@ -28,7 +28,7 @@ def get_args():
     parser.add_argument('-s', metavar='strandness', type=int, default=1,
         help='Strandness, 0=not, 1=forward, 2=reverse, default: 0')
     parser.add_argument('-c', dest='scale', metavar='scale', type=float, default=1,
-        help='Normalization scale, default: 1')
+        help='Normalization scale, 0=norm to 1M reads, default: 1')
     parser.add_argument('-b', metavar='binsize', type=int, default=50,
         help='binsize of bigWig, default: 50')
     parser.add_argument('--overwrite', action='store_true',
