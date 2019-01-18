@@ -8,13 +8,10 @@ __email__ = 'wangm08@hotmail.com'
 __date__ = '2018-12-25'
 __version__ = '0.2'
 
-import logging
+
 import argparse
 from hipipe_reporter import Alignment_reporter
 
-logging.basicConfig(format = '[%(asctime)s] %(message)s', 
-                    datefmt = '%Y-%m-%d %H:%M:%S', 
-                    level = logging.DEBUG)
 
 def get_args():
     """Alignment statistics
@@ -34,7 +31,7 @@ def get_args():
 
 def main():
     args = get_args()
-    Alignment_reporter(args.input, args.output, args.template).run()
+    Alignment_reporter(args.input, args.output, template=args.template).run()
 
 
 if __name__ == '__main__':

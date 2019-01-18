@@ -1,5 +1,8 @@
 #!/usr/bin/env Rscripts
 
+## make qc stat
+## save to a html file
+
 args <- commandArgs(trailingOnly = TRUE)
 
 if (length(args) < 1){
@@ -11,6 +14,10 @@ if (length(args) < 1){
 }
 
 qc.dir <- args[1]
+template <- NULL
+if (file.exists(args[2])) {
+  template <- args[2]
+}
 
 if (! dir.exists(qc.dir)) {
   stop("directory not exists")
@@ -35,8 +42,13 @@ if (! require(dplyr)) {
 
 library(goldclipReport)
 
-FastqcReport(qc.dir, qc.report, preview = FALSE)
-
+if (is.null(template)) {
+  print("default template")
+  FastqcReport(qc.dir, qc.report, preview = FALSE)
+} else {
+  print("custom template")
+  FastqcReport(qc.dir, qc.report, template = template, preview = FALSE)
+}
 ## save
 print(paste0("Saving results in ", qc.report))
 
