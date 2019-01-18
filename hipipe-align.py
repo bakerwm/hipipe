@@ -60,6 +60,9 @@ def get_args():
     parser.add_argument('--align-to-rRNA', dest='align_to_rRNA',
         action='store_true',
         help='if specified, align to rRNA before genome')
+    parser.add_argument('--not-merge-replicate', action='store_false',
+        dest='not_merge_rep',
+        help='if specified, do not merge replicates')
     parser.add_argument('--repeat-masked-genome', dest='repeat_masked_genome',
         action='store_true',
         help='map to repeat masked reference genome, data from EnsEMBL')
@@ -75,8 +78,11 @@ def get_args():
 def main():
     args = args_init(vars(get_args()), trim=False, align=True, call_peak=False) # save as dictionary
 
-    # specific
+    # specific arguments
     args['align_to_rRNA'] = True # force mapping to rRNA
+    if args['not_merge_rep']:
+        args['merge_rep'] = False # for replicates
+
     tmp = Alignment(**args).run()
 
 if __name__ == '__main__':
