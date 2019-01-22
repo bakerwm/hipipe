@@ -19,7 +19,10 @@ class QC_reporter(object):
     """
 
     def __init__(self, input, output, template=None):
-        self.input = input
+        if isinstance(input, list):
+            self.input = input
+        else:
+            self.input = [input, ]
         self.output = output
         self.template = template
 
@@ -42,7 +45,6 @@ class QC_reporter(object):
         """
         fq_files = []
         if os.path.isdir(x):
-            # f1 = findfiles("*.f[astq]*[.gz]*", x)
             fq_files = self.findfiles("*.f[astq]*", x)
         elif os.path.isfile(x):
             # f1 = [x]
@@ -59,7 +61,7 @@ class QC_reporter(object):
         try:
             p = subprocess.run(cmd, shell=True,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                # stderr=subprocess.STDOUT,
                 universal_newlines=True,
                 preexec_fn=os.setsid)
             logging.info('run_shell_cmd: CMD={}'.format(cmd))
@@ -117,7 +119,7 @@ class QC_reporter(object):
         main_script = os.path.realpath(__file__)
         home = os.path.dirname(main_script)
         report_r = os.path.join(home, 'qc_report.R')
-        report_html = os.path.join(self.output, 'report.html')
+        report_html = os.path.join(self.output, 'fastqc_report.html')
         ## for update template
         if self.template is None:
             self.template = ''
@@ -151,7 +153,10 @@ class Alignment_reporter(object):
         stat_list_name='mapping_stat.list', 
         out_html_name='alignment_report.html',
         template=None):
-        self.input = input
+        if isinstance(input, list):
+            self.input = input
+        else:
+            self.input = [input, ]
         self.output = output
         self.template = template
         self.suffix = suffix
@@ -214,7 +219,7 @@ class Alignment_reporter(object):
         try:
             p = subprocess.run(cmd, shell=True,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                #stderr=subprocess.STDOUT,
                 universal_newlines=True,
                 preexec_fn=os.setsid)
             logging.info('run_shell_cmd: CMD={}'.format(cmd))
@@ -228,7 +233,7 @@ class Alignment_reporter(object):
         ## input
         input_files = self.get_stat_files()
         if len(input_files) == 0:
-            raise Exception(self.suffix + ' file not detected')
+            raise Exception(self.suffix + ' file not detected in ' + self.output)
 
         ## check template
         if self.template is None:

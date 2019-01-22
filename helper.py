@@ -7,6 +7,7 @@ support functions for goldclip
 import os
 import sys
 import re
+import gzip
 import datetime
 import json
 import glob
@@ -27,10 +28,52 @@ from goldclip.bin.bed_fixer import *
 from goldclip.configure import goldclip_home
 from goldclip.helper import *
 
+
 logging.basicConfig(format = '[%(asctime)s] %(message)s', 
                     datefmt = '%Y-%m-%d %H:%M:%S', 
                     level = logging.DEBUG)
 
+
+
+def gzip_file(x, decompress=False, rm=True):
+    """Compress file using gzip module
+    remove original file or not
+    """
+    assert isinstance(x, str)
+
+    tag = False
+    if decompress:
+        ## decompress
+        x_ungz = os.path.splitext(x)[0] # remove extensiion
+        if is_gz(x):
+            if os.path.exists(x_ungz):
+                logging.info('target file exists, skip ungzip - %s' % x)
+            else:
+                with gzip.open(x, 'rb') as fi, open(x_ungz, 'wb') as fo:
+                    fo.writelines(fi)
+
+                if rm:
+                    os.remove(x)
+            tag = x_ungz
+        else:
+            logging.info('expect a gzip file, skip unzip- %s' % x)
+    else:
+        ## compress
+        xgz = x + '.gz'
+        if os.path.exists(xgz):
+            logging.info('file exists , skip gzip - %s' % xgz)
+            tag = xgz
+        elif is_gz(x):
+            logging.info('file is gzipped, skip gzip - %s' % x)
+            tag = x
+        else:
+            with open(x, 'rb') as fi, gzip.open(xgz, 'wb') as fo:
+                fo.writelines(fi)
+
+            if rm:
+                os.remove(x)
+            tag = xgz
+    return tag
 
 
 def findfiles(which, where='.'):
@@ -1034,6 +1077,11 @@ class BAM(object):
         bai = self.fn + '.bai'
         if not os.path.exists(bai):
             pysam.index(bam)
+
+        if os.path.exists(bai):
+            return True
+        else:
+            return False
 
 
     def sort(self):

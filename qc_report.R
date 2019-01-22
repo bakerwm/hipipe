@@ -22,7 +22,6 @@ if (file.exists(args[2])) {
 if (! dir.exists(qc.dir)) {
   stop("directory not exists")
 }
-qc.report <- file.path(qc.dir, "report")
 
 if (! require("devtools")) {
   install.packages("devtools")
@@ -42,15 +41,19 @@ if (! require(dplyr)) {
 
 library(goldclipReport)
 
+#qc.report <- file.path(qc.dir, "report")
+
 if (is.null(template)) {
   print("default template")
-  FastqcReport(qc.dir, qc.report, preview = FALSE)
+  # FastqcReport(qc.dir, qc.report, preview = FALSE)
+  fastqc_report(qc.dir, qc.dir, preview = FALSE)
 } else {
   print("custom template")
-  FastqcReport(qc.dir, qc.report, template = template, preview = FALSE)
+  # FastqcReport(qc.dir, qc.report, template = template, preview = FALSE)
+  fastqc_report(qc.dir, qc.dir, template = template, preview = FALSE)
 }
 ## save
-print(paste0("Saving results in ", qc.report))
+print(paste0("Saving results in ", qc.dir))
 
 ## EOF
 

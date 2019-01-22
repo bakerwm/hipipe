@@ -274,6 +274,11 @@ class Trimmer(object):
         logging.info('trimming SE reads: %s' % fq_prefix)
 
         arg_cmd = self.get_cutadapt_cmd()
+        if args['gzipped']:
+            fq_clean = fq_clean + '.gz'
+
+        print(fq_clean)
+
         if os.path.exists(fq_clean) and args['overwrite'] is False:
             logging.info('file exists, cutadapt skipped: %s' % fq_prefix)
         else:
@@ -547,6 +552,9 @@ class Trimmer(object):
             fq_count = int(file_row_counter(fq1_clean) / 4)
             with open(fq_count_file, 'wt') as fo:
                 fo.write(str(fq_count) + '\n')
+
+        ## gzipped
+        fq_return = gzip_file(fq_return, rm=True)
 
         return fq_return
 

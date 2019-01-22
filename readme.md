@@ -40,11 +40,63 @@ A group of scripts for HiSeq data, including demx, trimming, alignment etc.
 
 ### rnaseq
 
++ 1. single-mode: working one separate samples (including all replicates)
+
+  - genome_mapping (including extra mapping)  
+  - bigWig    
+  - count (featureCounts)  
+  - report (qc, mapping, mapping stat)    
+  - transposon_analysis (support dm3 now)    
+
++ 2. dual-mode: working on paired-samples (DE analysis)    
+
+  - count (featureCounts)  
+  - de_analysis (DESeq2)    
+  - report (DEseq html, transcripts.csv)    
+  - transposon_analysis (support dm3 now)
+
++ 3. summary
+
+  - qc report    
+  - mapping report    
+  - de count table    
+  - de scatter plot  
+
++ 4. Advance analysis
+
+  - GO, KEGG analysis (for given group of genes)    
+  - GSEA analysis    
+
 
 ### chipseq
 
++ 1. single-mode: working on separate samples (Input + IP)    
+
+  - genome_mapping    
+  - bigWig    
+  - macs2_output    
+  - track_views
+
++ 2. dual-mode: working on paired samples (het vs mut)
+
+  - bigWig    
+  - track_views
 
 ### smRNAseq
+
++ 1. single-mode: working on separate samples (replicates)    
+
+  - genome_mapping    
+  - hairpin_mapping    
+  - bigWig    
+  - small RNA categories (map to miRNA, siRNA, rRNA, snoRNA, piRNA, tRNA, ...)
+  - count (TPM)    
+  - report (qc, mapping)
+
++ 2. dual-mode: working on paired-samples (DE analysis)    
+
+  - count  
+  - report
 
 
 ### goldclip
