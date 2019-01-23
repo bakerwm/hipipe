@@ -1,0 +1,4 @@
+
+## to-do
+1. validate genome_path, MT_trRNA, rRNA, genome for given genomes
+2. 
