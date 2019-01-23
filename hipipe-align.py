@@ -67,7 +67,7 @@ def get_args():
     parser.add_argument('--repeat-masked-genome', dest='repeat_masked_genome',
         action='store_true',
         help='map to repeat masked reference genome, data from EnsEMBL')
-    parser.add_argument('--path_data', 
+    parser.add_argument('--genome-path', dest='genome_path',
         help='The directory of genome files, default: \
         [$HOME/data/genome/]')
     parser.add_argument('--overwrite', action='store_true',

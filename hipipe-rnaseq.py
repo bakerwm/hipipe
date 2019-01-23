@@ -98,7 +98,7 @@ def get_args():
     parser.add_argument('--bin-size', dest='bin_size', metavar='binsize', 
         type=int, default=50,
         help='binsize of bigWig, default: 50')
-    parser.add_argument('--path_data', 
+    parser.add_argument('--genome-path', dest='genome_path',
         help='The directory of genome files, default: \
         [$HOME/data/genome/]')
     parser.add_argument('--overwrite', action='store_true',
@@ -210,7 +210,7 @@ def main():
     
     # determine gtf
     if args['gtf'] is None:
-        args['gtf'] = Genome(args['genome']).gene_gtf('ensembl')
+        args['gtf'] = Genome(args['genome'], genome_path=args['genome_path']).gene_gtf('ensembl')
 
     # prep-dirs
     project_path = prepare_project(args['path_out'])
@@ -334,7 +334,7 @@ def main():
         te_count_path = os.path.join(te_path, 'count')
         assert is_path(te_count_path)
         te_count_file = os.path.join(te_count_path, 'count.txt')
-        te_gtf = Genome(args['genome']).te()
+        te_gtf = Genome(args['genome'], genome_path=args['genome_path']).te()
 
         if te_gtf is None:
             logging.error('file not exists, te_gtf - %s' % te_gtf)
