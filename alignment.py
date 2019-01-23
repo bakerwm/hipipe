@@ -487,7 +487,9 @@ class Alignment(object):
             merged_files = []
             if len(bam_out) > 1: # for multiple bam files
                 for i in range(len(bam_out[0])):
-                    rep_bam_files = [b[i] for b in bam_out]
+                    rep_bam_files = [b[i] for b in bam_out if not b[i] is None]
+                    if len(rep_bam_files) < 1:
+                        continue # contains None in either
                     merged_suffix = str_common(rep_bam_files, suffix=True)
                     merged_suffix = re.sub('^_[12]|_R[12]', '', merged_suffix)
                     merged_bam_name = args['smp_name'] + merged_suffix
@@ -498,7 +500,6 @@ class Alignment(object):
                         logging.info('bam file exists: %s' % merged_bam_file)
                     else:
                         tmp = bam_merge(rep_bam_files, merged_bam_file)
-                    print(merged_bam_file)
                     merged_files.append(merged_bam_file)
                     Alignment_stat(merged_path).saveas()
                 bam_out.append(merged_files)

@@ -274,6 +274,11 @@ class Trimmer(object):
         logging.info('trimming SE reads: %s' % fq_prefix)
 
         arg_cmd = self.get_cutadapt_cmd()
+        if args['gzipped']:
+            fq_clean = fq_clean + '.gz'
+
+        print(fq_clean)
+
         if os.path.exists(fq_clean) and args['overwrite'] is False:
             logging.info('file exists, cutadapt skipped: %s' % fq_prefix)
         else:
@@ -325,8 +330,11 @@ class Trimmer(object):
         args = self.kwargs.copy()
         path_rmdup = os.path.join(args['path_out'], 'rm_PCR_dup')
         assert is_path(path_rmdup)
-        pkg_dir = os.path.split(goldclip.__file__)[0]
-        fa2fq = os.path.join(pkg_dir, 'bin', 'fasta_to_fastq.pl')
+        basedir = os.path.dirname(os.path.realpath(__file__))
+        fa2fq = os.path.join(basedir, 'fasta_to_fastq.pl')
+
+        if not os.path.exists(fa2fq):
+            raise Exception('file not exists - %s' % fa2fq)
 
         if fq_in is None:
             fq_in = args['fq1']
@@ -547,6 +555,9 @@ class Trimmer(object):
             fq_count = int(file_row_counter(fq1_clean) / 4)
             with open(fq_count_file, 'wt') as fo:
                 fo.write(str(fq_count) + '\n')
+
+        ## gzipped
+        fq_return = gzip_file(fq_return, rm=True)
 
         return fq_return
 

@@ -85,6 +85,8 @@ def get_args():
         help='if spcified, overwrite exists file')
     parser.add_argument('--keep-name', action='store_true', dest='keep_name',
         help='if specified, do not change file names')
+    parser.add_argument('--gzipped', action='store_true', 
+        help='if specified, gzipped fastq file output')
     
     ## extra arguments
     parser.add_argument('--adapter-sliding', dest='adapter_sliding', 

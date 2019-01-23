@@ -20,6 +20,7 @@ import pathlib
 import argparse
 from arguments import args_init
 from alignment import Alignment, Alignment_log, Alignment_stat
+from hipipe_reporter import Alignment_reporter
 
 
 def get_args():
@@ -83,7 +84,9 @@ def main():
     if args['not_merge_rep']:
         args['merge_rep'] = False # for replicates
 
-    tmp = Alignment(**args).run()
+    tmp1 = Alignment(**args).run()
+    tmp2 = Alignment_reporter(input=args['path_out'], output=args['path_out']).run()
+
 
 if __name__ == '__main__':
     main()

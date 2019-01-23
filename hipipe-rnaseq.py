@@ -52,6 +52,7 @@ import pysam
 from arguments import args_init
 from helper import *
 from alignment import Alignment, Alignment_log, Alignment_stat
+from hipipe_reporter import QC_reporter, Alignment_reporter
 
 
 def get_args():
@@ -110,7 +111,7 @@ def prepare_project(path):
     """Prepare subdirs for project"""
     # assert os.path.isdir(path)
     assert isinstance(path, str)
-    subdirs = ['genome_mapping', 'count', 'bigWig', 'de_analysis', 'report', 
+    subdirs = ['qc', 'genome_mapping', 'count', 'bigWig', 'de_analysis', 'report', 
                'transposon_analysis', 'src']
     prj_dirs = [os.path.join(path, f) for f in subdirs]
     tmp = [is_path(f) for f in prj_dirs]
@@ -119,19 +120,6 @@ def prepare_project(path):
     for k, v in zip(subdirs, prj_dirs):
         prj_dict[k] = v
     return prj_dict
-
-
-def _is_bam_indexed(bam, overwrite=False):
-    """Check if *.bai file exists"""
-    bai = bam + '.bai'
-    if os.path.exists(bai) and overwrite is False:
-        return True
-    else:
-        pysam.index(bam)
-        if os.path.exists(bai):
-            return True
-        else:
-            return False
 
 
 def fc_run(gtf, bam, fout, strandness=0, threads=8, overwrite=False):
@@ -152,7 +140,8 @@ def fc_run(gtf, bam, fout, strandness=0, threads=8, overwrite=False):
     flog = fout + '.featureCounts.log'
     bam_line = ' '.join(bam)
     # check bam files
-    bam_flag = [_is_bam_indexed(f) for f in bam]
+    # bam_flag = [_is_bam_indexed(f) for f in bam]
+    bam_flag = [BAM(f).index() for f in bam]
     if all(bam_flag) is False:
         raise ValueError('%10s | generating bai files, wrong' % 'failed')
 
@@ -233,6 +222,11 @@ def main():
     #    |-report
     #    |-src
 
+    ## qc stat
+    qc_report_path = os.path.join(project_path['report'], 'qc')
+    fq_files = args['a'] + args['b']
+    QC_reporter(fq_files, qc_report_path).run()
+
     ## mapping ##
     args_map = args.copy()
     tmp1 = args_map.pop('fq1', None) # remove 'fq1' from args
@@ -260,6 +254,11 @@ def main():
     assert is_path(tre_path)
     tre_bam_files, tre_bam_ext_files = Alignment(
         fq1=tre_fqs, path_out=tre_path, smp_name=args['B'], **args_map).run()
+
+    ## mapping stat
+    map_report_path = os.path.join(project_path['report'], 'mapping')
+    map_path_list = [ctl_path, tre_path]
+    Alignment_reporter(map_path_list, map_report_path).run()
     
     ## create bigWig files ##
     map_bam_files = ctl_bam_files + tre_bam_files
@@ -317,9 +316,7 @@ def main():
         te_tre_path = os.path.join(tre_path, 'extra_mapping_ext1')
        
         ## TE mapping
-        te_map_bam_files = ctl_bam_ext_files + tre_bam_ext_files
-        # flatten the nested lists
-        te_map_bam_files = [item for sublist in te_map_bam_files for item in sublist]
+        te_map_bam_files = [b[0] for b in ctl_bam_ext_files] + [b[0] for b in tre_bam_ext_files]
 
         ## make bigWig
         te_bw_path = os.path.join(te_path, 'bigWig')
@@ -337,10 +334,8 @@ def main():
         te_count_path = os.path.join(te_path, 'count')
         assert is_path(te_count_path)
         te_count_file = os.path.join(te_count_path, 'count.txt')
-        # te_gtf = '/home/data/genome/dm3/dm3_transposon/dm3.transposon.gtf'
         te_gtf = Genome(args['genome']).te()
 
-        print(te_gtf)
         if te_gtf is None:
             logging.error('file not exists, te_gtf - %s' % te_gtf)
             return None # stop TE analysis

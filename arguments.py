@@ -50,6 +50,7 @@ def args_init(args=None, demx=False, trim=True, align=True, call_peak=False):
             args['cut_before_trim'] = args.get('cut_before_trim', '0')
             args['cut_after_trim'] = args.get('cut_after_trim', '7,-7') # NSR
             args['trim_to_length'] = args.get('trim_to_length', 0)
+            args['gzipped'] = args.get('gzipped', False) # output fastq
 
             ## PE trimming options
             args['AD3'] = args.get('AD3', 'AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT')
