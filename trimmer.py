@@ -330,8 +330,11 @@ class Trimmer(object):
         args = self.kwargs.copy()
         path_rmdup = os.path.join(args['path_out'], 'rm_PCR_dup')
         assert is_path(path_rmdup)
-        pkg_dir = os.path.split(goldclip.__file__)[0]
-        fa2fq = os.path.join(pkg_dir, 'bin', 'fasta_to_fastq.pl')
+        basedir = os.path.dirname(os.path.realpath(__file__))
+        fa2fq = os.path.join(basedir, 'fasta_to_fastq.pl')
+
+        if not os.path.exists(fa2fq):
+            raise Exception('file not exists - %s' % fa2fq)
 
         if fq_in is None:
             fq_in = args['fq1']
