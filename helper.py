@@ -689,6 +689,9 @@ class Genome(object):
         # else:
         #     aligner = aligner_exe
 
+        # if index is None:
+        #     return None
+
         flag = False
         if aligner.lower().startswith('bowtie'):
             # bowtie, bowtie2
@@ -834,7 +837,6 @@ class Genome(object):
         te_gtf = os.path.join(self.genome_path, self.genome, 
             self.genome + '_transposon', 
             self.genome + '_transposon.gtf')
-        print(te_gtf)
         if not os.path.exists(te_gtf):
             te_gtf = None
 
