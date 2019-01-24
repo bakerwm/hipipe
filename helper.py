@@ -635,7 +635,7 @@ class Genome(object):
         self.kwargs = kwargs
 
         if genome_path is None:
-            genome_path = os.path.join(pathlib.Path.home(), 'data', 'genome')
+            genome_path = os.path.join(str(pathlib.Path.home()), 'data', 'genome')
         self.genome_path = genome_path
 
 
