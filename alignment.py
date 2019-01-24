@@ -98,11 +98,11 @@ class Alignment(object):
             genome = args['genome']
         # check aligner
         if aligner == 'bowtie':
-            index = Genome(genome, repeat_masked_genome=args['repeat_masked_genome']).bowtie_index(rRNA=rRNA)
+            index = Genome(genome, genome_path=args['genome_path'], repeat_masked_genome=args['repeat_masked_genome']).bowtie_index(rRNA=rRNA)
         elif aligner == 'bowtie2':
-            index = Genome(genome, repeat_masked_genome=args['repeat_masked_genome']).bowtie2_index(rRNA=rRNA)
+            index = Genome(genome, genome_path=args['genome_path'], repeat_masked_genome=args['repeat_masked_genome']).bowtie2_index(rRNA=rRNA)
         elif aligner == 'STAR':
-            index = Genome(genome, repeat_masked_genome=args['repeat_masked_genome']).star_index(rRNA=rRNA)
+            index = Genome(genome, genome_path=args['genome_path'], repeat_masked_genome=args['repeat_masked_genome']).star_index(rRNA=rRNA)
         else:
             logging.error('unknown aligner: %s' % aligner)
             index = None # unknonwn aligner
@@ -455,7 +455,8 @@ class Alignment(object):
 
         bam_ext_list = []
         for ext in args['index_ext']:
-            if index_validator(ext, args['aligner']):
+            ext_status = Genome("dm3").index_validator(ext, aligner)
+            if ext_status:
                 reference = 'ext%s' % str(args['index_ext'].index(ext) + 1)
                 fq_path = os.path.join(align_path, 'extra_mapping_' + reference, fq_prefix)
                 assert is_path(fq_path)

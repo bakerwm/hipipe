@@ -86,7 +86,6 @@ def findfiles(which, where='.'):
     return [name for name in os.listdir(where) if rule.match(name)]
 
 
-
 def which(program):
     def is_exe(fpath):
         return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
@@ -140,19 +139,6 @@ def args_logger(d, x, overwrite=False):
             fo.write('\n'.join(n) + '\n')
         return '\n'.join(n)
 
-
-##-------------------------------------------##
-## formatter
-# def nested_dict_values(d):
-#     """
-#     get all values from nested dict
-#     """
-#     for v in d.values():
-#         if isinstance(v, dict):
-#             yield from nested_dict_values(v)
-#         else:
-#             yield v
-            
 
 def is_gz(filepath):
     with open(filepath, 'rb') as test_f:
@@ -349,7 +335,8 @@ def filename_shorter(fn, with_path=False):
         p2 = os.path.basename(p2)
     return p2 + px
 
-##--------------------------------------------##
+
+################################################################################
 ## virtualenv 
 def is_venv():
     """
@@ -405,8 +392,7 @@ def venv_checker(venv = '~/envs/py27', into_venv = True):
             return ('not in venv: ' + venv_in)
 
 
-
-##--------------------------------------------##
+################################################################################
 ## config
 def bam2bw(bam, genome, path_out, strandness=True, binsize=1, overwrite=False):
     """
@@ -458,7 +444,6 @@ def bam2bw(bam, genome, path_out, strandness=True, binsize=1, overwrite=False):
                 subprocess.run(shlex.split(c3), stdout=fo, stderr=fo)
 
 
-
 def bam_merge(bam_ins, bam_out):
     """
     merge multiple bam files
@@ -484,166 +469,6 @@ def bam_merge(bam_ins, bam_out):
         os.remove(bam_out + '.unsorted.bam')
 
 
-
-
-class Genome_info(object):
-    """List related information of specific genome
-    1. get_fa(), genome fasta
-    2. get_fasize(), genome fasta size
-    3. bowtie_index(), bowtie index, optional, rRNA=True
-    4. bowtie2_index(), bowtie2 index, optional, rRNA=True
-    5. star_index(), STAR index, optional, rRNA=True
-    6. gene_bed(), 
-    7. gene_rmsk(), 
-    8. gene_gtf(), optional, version='ucsc|ensembl|ncbi'
-    9. te_gtf(), optional, version='ucsc'
-    10. te_consensus(), optional, fruitfly()
-    ...
-
-    index, annotation, ...
-    """
-
-    def __init__(self, genome, **kwargs):
-        assert isinstance(genome, str)
-        self.kwargs = kwargs
-        self.kwargs['genome'] = genome
-        if not 'genome_path' in kwargs:
-            self.kwargs['path_data'] = os.path.join(pathlib.Path.home(), 
-                                                    'data', 'genome')
-        
-
-    def get_fa(self):
-        genome = self.kwargs['genome']
-        path_data = self.kwargs['path_data']
-        gfa = os.path.join(path_data, genome, 'bigZips', genome + '.fa')
-        assert os.path.exists(gfa)
-        return gfa
-
-
-    def get_fasize(self):
-        genome = self.kwargs['genome']
-        path_data = self.kwargs['path_data']
-        gsize = os.path.join(path_data, genome, 'bigZips', genome + '.chrom.sizes')
-        assert os.path.exists(gsize)
-        return gsize
-
-
-    def bowtie_index(self):
-        genome = self.kwargs['genome']
-        path_data = self.kwargs['path_data']
-        return idx_picker(genome, path_data=path_data, aligner='bowtie')
-
-
-    def bowtie2_index(self):
-        genome = self.kwargs['genome']
-        path_data = self.kwargs['path_data']
-        return idx_picker(genome, path_data=path_data, aligner='bowtie2')
-
-
-    def hisat2_index(self):
-        genome = self.kwargs['genome']
-        path_data = self.kwargs['path_data']
-        return idx_picker(genome, path_data=path_data, aligner='hisat2')
-
-
-    def star_index(self):
-        genome = self.kwargs['genome']
-        path_data = self.kwargs['path_data']
-        return idx_picker(genome, path_data=path_data, aligner='star')
-
-
-    def phylop100(self):
-        """
-        only support hg19
-        """
-        genome = self.kwargs['genome']
-        path_data = self.kwargs['path_data']
-        phylop100 = os.path.join(self.kwargs['path_data'],
-                            genome, 'phyloP100way', 
-                            genome + '.100way.phyloP100way.bw')
-        if not os.path.exists(phylop100):
-            phylop100 = None
-        return phylop100
-
-        
-    def gene_bed(self):
-        genome = self.kwargs['genome']
-        path_data = self.kwargs['path_data']
-        gbed = os.path.join(path_data, 
-                            genome,
-                            'annotation_and_repeats', 
-                            genome + '.refseq.bed')
-        if not os.path.exists(gbed):
-            gbed = None
-        return gbed
-
-
-    def gene_rmsk(self):
-        genome = self.kwargs['genome']
-        path_data = self.kwargs['path_data']
-        grmsk= os.path.join(path_data, 
-                            genome,
-                            'annotation_and_repeats', 
-                            genome + '.rmsk.bed')
-        if not os.path.exists(grmsk):
-            grmsk = None
-        return grmsk
-
-
-
-def is_idx(path, aligner='bowtie'):
-    """
-    check aligner index, bowtie, bowtie2, STAR
-    """
-    # bowtie/bowtie2
-    c = [aligner + '-inspect', '-s', path]
-    if aligner.lower() == 'star':
-        pg = os.path.join(path, 'Genome')
-        flag = True if os.path.exists(pg) else False
-    else:
-        p = subprocess.run(c, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout
-        flag = True if len(p) > 0 else False
-    return flag
-
-
-
-def idx_picker(genome, group='genome', path_data=None, aligner='bowtie'):
-    """
-    return the path of index
-    group: genome, rRNA, tRNA, ...
-    aligner: bowtie, bowie2
-    #
-    default: path ~/data/genome/
-    """
-    assert isinstance(group, str)
-    # assert isinstance(genome, str)
-    if genome is None:
-        return None    
-    if path_data is None:
-        path_data = os.path.join(pathlib.Path.home(), 'data', 'genome')
-    idx = os.path.join(path_data, genome, aligner + '_index', group)
-    if aligner.lower() == 'star':
-        idx = os.path.join(path_data, genome, 'STAR_index', group)
-    if is_idx(idx, aligner):
-        return idx
-    else:
-        return None
-    
-
-
-def idx_grouper(genome, path_data=None, aligner='bowtie'):
-    """
-    return a group of indexes for genome mapping
-    eg: spikein, MT_trRNA, genome
-    """
-    group1 = ['viral', 'repeatRNA', 'retroviral', 'MT_trRNA', 'genome']
-    idxes = [idx_picker(genome, g, path_data=path_data, aligner=aligner) for g in group1]
-    idxes = list(filter(None.__ne__, idxes))
-    return idxes
-
-
-
-
 def bed_parser(fn, usecols = None):
     """
     read BED file as pandas DataFrame
@@ -664,40 +489,6 @@ def bed_parser(fn, usecols = None):
         return bed_fixer(df)
 
 
-
-# def bed_filter(fn, bed_exclude, bed_out, overlap = True, save = True):
-#     """
-#     remove records from fn that have overlap with bed_exclude, and 
-#     save to fn using pybedtools
-#     overlap, True: intersect, False: not intersect
-#     """
-#     assert pathlib.Path(fn).is_file()
-#     bed_out_path = os.path.dirname(bed_out)
-#     assert is_path(bed_out_path)
-#     a = pybedtools.BedTool(fn)
-#     b = pybedtools.BedTool(bed_exclude)
-#     if overlap is True:
-#         a_and_b = a.intersect(b, wa = True, u = True) # intersect with b
-#     elif overlap is False:
-#         a_and_b = a.intersect(b, wa = True, v = True) # exclude b
-#     else:
-#         logging.error('unknown overlap: %s' % overlap)
-#     if save is True:
-#         a_and_b.moveto(bed_out)
-#     else:
-#         return a_and_b # BedTool object
-
-
-# def bed_fixer(df):
-#     """
-#     filt BED records 
-#     1. start, end both are int
-#     2. start < end
-#     """
-#     dx = df[['start', 'end']].apply(pd.to_numeric)
-#     c = ((dx['start'] >=  0) & dx['end'] >=  0) & (dx['start'] < dx['end'])
-#     return df.loc[c, :]
-
 def bam2bigwig2(bam, path_out, scale=1, binsize=1, overwrite=False):
     """Convert BAM to bigWig using deeptools"""
     bamcoverage_exe = which('bamCoverage')
@@ -717,8 +508,6 @@ def bam2bigwig2(bam, path_out, scale=1, binsize=1, overwrite=False):
             raise ValueError('failed to create bigWig file, %s' % bw_out)
 
 
-
-## utilities
 def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False):
     """Convert bam to bigWig using deeptools
     https://deeptools.readthedocs.io/en/develop/content/feature/effectiveGenomeSize.html
@@ -772,9 +561,9 @@ def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False):
             # attention; bamCoverage using dUTP-based library
             # reverse, forward
             c1 = 'bamCoverage -b {} -o {} --binSize {} --filterRNAstrand forward \
-                  --normalizeTo1x {}'.format(bam, bw_fwd, binsize, gsize)
+                  --effectiveGenomeSize {}'.format(bam, bw_fwd, binsize, gsize)
             c2 = 'bamCoverage -b {} -o {} --binSize {} --filterRNAstrand reverse \
-                  --normalizeTo1x {}'.format(bam, bw_rev, binsize, gsize)
+                  --effectiveGenomeSize {}'.format(bam, bw_rev, binsize, gsize)
             if os.path.exists(bw_fwd) and os.path.exists(bw_rev) and not overwrite:
                 logging.info('file exists, bigWig skipped ...')
             else:
@@ -790,7 +579,7 @@ def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False):
             logging.info('bigWig file exists, skipping: %s' % prefix)
         else:
             c3 = 'bamCoverage -b {} -o {} --binSize {} \
-                  --normalizeTo1x {}'.format(bam, bw, binsize, gsize)
+                  --effectiveGenomeSize {}'.format(bam, bw, binsize, gsize)
             if os.path.exists(bw) and not overwrite:
                 logging.info('file exists, bigWig skipped ...')
             else:
@@ -800,11 +589,7 @@ def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False):
                 raise ValueError('output file is missing, check log file: %s' % bw_log)
 
 
-
 ################################################################################
-## split line
-################################################################################
-
 def download(url, file_name):
     # open in binary mode
     with open(file_name, "wb") as file:
@@ -812,83 +597,6 @@ def download(url, file_name):
         response = get(url)
         # write to file
         file.write(response.content)
-
-
-def index_validator(index, aligner='bowtie'):
-    """Check the index
-    search the aligner in $PATH
-    1. bowtie: bowtie-inspect -s <index>
-    2. bowtie2: bowtie2-inspect -s <index>
-    3. STAR: <index>/Genome, file exists
-    4. ...
-    """
-    # check command
-    aligner_exe = which(aligner)
-    if not aligner_exe:
-        raise ValueError('aligner not detected in $PATH: %s' % aligner)
-    # else:
-    #     aligner = aligner_exe
-
-    flag = False
-    if aligner.lower().startswith('bowtie'):
-        # bowtie, bowtie2
-        c = [aligner_exe + '-inspect', '-s', index]
-        p = subprocess.run(c, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if len(p.stdout) > 0:
-            flag = True
-    elif aligner.lower() == 'star':
-        p = os.path.join(index, 'Genome')
-        if os.path.exists(p):
-            flag = True
-    else:
-        raise ValueError('unknown aligner: %s' % aligner)
-
-    return flag
-
-
-def index_finder(genome, aligner='bowtie', rRNA=False, genome_path=None,
-    repeat_masked_genome=False):
-    """Find aligner index
-    if rRNA is True, return the rRNA index only
-    if return None, the index not found, or file not exists
-    check if repeat masked genome required (for non-TE mapping)
-    
-    structure of genome_path:
-    default: {HOME}/data/genome/{genome_version}/{aligner}/
-
-    /genome_path/
-        |- genome
-        |- rRNA
-        |- MT_trRNA
-        |- 
-
-    """
-    # determine the path of genome data
-    if genome_path is None:
-        genome_path = os.path.join(pathlib.Path.home(), 'data', 'genome')
-
-    # rRNA
-    if rRNA:
-        # choose the first one
-        rRNA_list = ['MT_trRNA', 'rRNA']
-        idx_rRNA = [os.path.join(genome_path, genome, aligner + '_index', i) for i in rRNA_list]
-        idx_rRNA = [i for i in idx_rRNA if index_validator(i, aligner)]
-        if len(idx_rRNA) >= 1:
-            idx = idx_rRNA[0]
-        else:
-            idx = None
-    # genome
-    else:
-        if repeat_masked_genome:
-            tag = 'genome_rm'
-        else:
-            tag = 'genome'
-        idx = os.path.join(genome_path, genome, aligner + '_index', tag)
-
-    # validate
-    if not index_validator(idx, aligner):
-        idx = None
-    return idx
 
 
 class Genome(object):
@@ -923,11 +631,12 @@ class Genome(object):
     def __init__(self, genome, genome_path=None, repeat_masked_genome=False, **kwargs):
         assert isinstance(genome, str)
         self.genome = genome
-        if not genome_path:
-            genome_path = os.path.join(pathlib.Path.home(), 'data', 'genome')
-        self.genome_path = genome_path
         self.repeat_masked_genome = repeat_masked_genome
         self.kwargs = kwargs
+
+        if genome_path is None:
+            genome_path = os.path.join(pathlib.Path.home(), 'data', 'genome')
+        self.genome_path = genome_path
 
 
     def get_fa(self):
@@ -964,12 +673,88 @@ class Genome(object):
         return fa_size
 
 
+    def index_validator(self, index, aligner):
+        """Validate the index for aligner
+        search the aligner in $PATH
+        1. bowtie: bowtie-inspect -s <index>
+        2. bowtie2: bowtie2-inspect -s <index>
+        3. STAR: <index>/Genome, file exists
+        4. ...
+        """
+        # check command
+        aligner_exe = which(aligner)
+
+        if not aligner_exe:
+            raise Exception('aligner not detected in $PATH: %s' % aligner)
+        # else:
+        #     aligner = aligner_exe
+
+        # if index is None:
+        #     return None
+
+        flag = False
+        if aligner.lower().startswith('bowtie'):
+            # bowtie, bowtie2
+            c = [aligner_exe + '-inspect', '-s', index]
+            p = subprocess.run(c, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if len(p.stdout) > 0:
+                flag = True
+        elif aligner.lower() == 'star':
+            p = os.path.join(index, 'Genome')
+            if os.path.exists(p):
+                flag = True
+        else:
+            raise ValueError('unknown aligner: %s' % aligner)
+
+        return flag
+
+
+    def index_finder(self, aligner='bowtie', rRNA=False,
+        repeat_masked_genome=False):
+        """Find the index for aligner: STAR, bowtie, bowtie2
+        if rRNA is True, return the rRNA index only
+        if return None, the index not found, or file not exists
+        check if repeat masked genome required (for non-TE mapping)
+        
+        structure of genome_path:
+        default: {HOME}/data/genome/{genome_version}/{aligner}/
+
+        /genome_path/
+            |- genome
+            |- rRNA
+            |- MT_trRNA
+            |- 
+
+        """
+        # rRNA
+        if rRNA:
+            # choose the first one
+            rRNA_list = ['MT_trRNA', 'rRNA']
+            index_rRNA = [os.path.join(self.genome_path, self.genome, aligner + '_index', i) for i in rRNA_list]
+            index_rRNA = [i for i in index_rRNA if self.index_validator(i, aligner)]
+            if len(index_rRNA) >= 1:
+                index = index_rRNA[0]
+            else:
+                index = None
+        # genome
+        else:
+            if repeat_masked_genome:
+                tag = 'genome_rm'
+            else:
+                tag = 'genome'
+            index = os.path.join(self.genome_path, self.genome, aligner + '_index', tag)
+
+        # validate
+        if not self.index_validator(index, aligner):
+            index = None
+        return index
+
+
     def bowtie_index(self, rRNA=False):
         """Return the bowtie index for the genome
         optional, return rRNA index
         """
-        index = index_finder(self.genome, aligner='bowtie', rRNA=rRNA,
-            genome_path=self.genome_path, 
+        index = self.index_finder(aligner='bowtie', rRNA=rRNA,
             repeat_masked_genome=self.repeat_masked_genome)
         return index
 
@@ -978,8 +763,7 @@ class Genome(object):
         """Return the bowtie2 index for the genome
         optional, return rRNA index
         """
-        index = index_finder(self.genome, aligner='bowtie2', rRNA=rRNA,
-            genome_path=self.genome_path, 
+        index = self.index_finder(aligner='bowtie2', rRNA=rRNA,
             repeat_masked_genome=self.repeat_masked_genome)
         return index
 
@@ -988,8 +772,7 @@ class Genome(object):
         """Return the STAR index for the genome
         optional, return rRNA index
         """
-        index = index_finder(self.genome, aligner='STAR', rRNA=rRNA,
-            genome_path=self.genome_path, 
+        index = self.index_finder(aligner='STAR', rRNA=rRNA,
             repeat_masked_genome=self.repeat_masked_genome)
         return index
 
@@ -998,8 +781,7 @@ class Genome(object):
         """Return the Hisat2 index for the genome
         optional, return rRNA index
         """
-        index = index_finder(self.genome, aligner='hisat2', rRNA=rRNA,
-            genome_path=self.genome_path, 
+        index = self.index_finder(aligner='hisat2', rRNA=rRNA,
             repeat_masked_genome=self.repeat_masked_genome)
         return index
 
@@ -1055,7 +837,6 @@ class Genome(object):
         te_gtf = os.path.join(self.genome_path, self.genome, 
             self.genome + '_transposon', 
             self.genome + '_transposon.gtf')
-        print(te_gtf)
         if not os.path.exists(te_gtf):
             te_gtf = None
 
@@ -1115,7 +896,6 @@ class BAM(object):
                 return True
             else:
                 return False
-
 
 
 class Bed_parser(object):
@@ -1256,3 +1036,4 @@ class Bed_parser(object):
         df_filted = df.loc[v, :]
         return Bed_parser(df_filted)
         
+

@@ -13,8 +13,8 @@ if (length(args) < 2){
   stop("arguments failed")
 }
 
-align_input  <- args[1]
-align_output <- args[2]
+input  <- args[1]
+output <- args[2]
 template <- NULL
 if (file.exists(args[3])) {
   template <- args[3]
@@ -36,11 +36,11 @@ if (! require(dplyr)) {
 library(goldclipReport)
 
 ## check arguments
-if(dir.exists(align_input)) {
-  stat_files <- list.files(align_input, "*mapping_stat.csv", all.files = TRUE,
+if(dir.exists(input)) {
+  stat_files <- list.files(input, "*mapping_stat.csv", all.files = TRUE,
                            full.names = TRUE, ignore.case = TRUE)
-} else if(file.exists(align_input)) {
- stat_files <- readr::read_lines(align_input, skip_empty_rows = TRUE)
+} else if(file.exists(input)) {
+ stat_files <- readr::read_lines(input, skip_empty_rows = TRUE)
 } else {
   stat_files <- NULL
 }
@@ -51,12 +51,12 @@ if(length(stat_files) == 0) {
 
 if (is.null(template)) {
   print("using default template")
-  align_report(stat_files, align_output, preview = FALSE)
+  align_report(stat_files, output, preview = FALSE)
 } else {
   print("custom template")
-  align_report(stat_files, align_output, template = template, preview = FALSE)
+  align_report(stat_files, output, template = template, preview = FALSE)
 }
 ## save
-print(paste0("Saving results in ", align_output))
+print(paste0("Saving results in ", output))
 
 ## EOF
