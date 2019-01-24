@@ -26,7 +26,6 @@ import re
 import shlex
 import subprocess
 import logging
-import goldclip
 from utils_parser import *
 from helper import *
 from arguments import args_init
@@ -276,8 +275,6 @@ class Trimmer(object):
         arg_cmd = self.get_cutadapt_cmd()
         if args['gzipped']:
             fq_clean = fq_clean + '.gz'
-
-        print(fq_clean)
 
         if os.path.exists(fq_clean) and args['overwrite'] is False:
             logging.info('file exists, cutadapt skipped: %s' % fq_prefix)
@@ -538,12 +535,15 @@ class Trimmer(object):
         ## SE mode
         if args['fq2'] is None:
             fq_return = self.run_se()
+            fq_return = gzip_file(fq_return, rm=True)
             fq1_clean = fq_return
 
         ## PE mode
         elif os.path.exists(args['fq2']):
             fq_return = self.run_pe()
-            fq1_clean = fq_return[0]
+            fq_return1 = gzip_file(fq_return[0], rm=True)
+            fq_return2 = gzip_file(fq_return[1], rm=True)
+            fq1_clean = fq_return1
 
         else:
             raise Exception('Illegal --fq2 argument: %s' % args['fq2'])
@@ -556,11 +556,7 @@ class Trimmer(object):
             with open(fq_count_file, 'wt') as fo:
                 fo.write(str(fq_count) + '\n')
 
-        ## gzipped
-        fq_return = gzip_file(fq_return, rm=True)
-
         return fq_return
-
 
 
 ## EOF
