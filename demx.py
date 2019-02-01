@@ -295,7 +295,7 @@ class Demx(object):
         assert isinstance(p7_len, int)
         x_name, x_seq, _, x_qual = x
         p7_query = x_name.split(':')[-1]
-        if not p7_len in list(range(4, 8)):
+        if not p7_len in list(range(4, 9)):
             raise Exception('Illegal <p7_len>, should be [4, 8] in length: %s' % p7_len)
         p7_query = p7_query[:p7_len]
         return [(x_name, x_seq, '+', x_qual), p7_query]
