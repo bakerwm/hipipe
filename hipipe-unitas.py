@@ -59,7 +59,7 @@ class Unitas(object):
             with open(f, 'rt') as fi:
                 for line in fi:
                     level = int(self.leading_spaces(line) / 3)
-                    if level > 0:
+                    if level > 1:
                         continue
                     group, count = line.strip().split('\t')
                     group = re.sub(' ', '_', group)
