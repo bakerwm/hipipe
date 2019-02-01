@@ -498,7 +498,7 @@ class Trimmer(object):
         ## 3. cut N-bases after trim
         if not args['cut_after_trim'] == '0':
             fq1_tmp1 = fq1_clean + '.before_cut_after_trim.tmp'
-            fq2_tmp2 = fq2_clean + '.before_cut_after_trim.tmp'
+            fq2_tmp1 = fq2_clean + '.before_cut_after_trim.tmp'
             os.rename(fq1_clean, fq1_tmp1)
             os.rename(fq2_clean, fq2_tmp1)
             fq1_clean = self.cut_ends(fq_in=fq1_tmp1, fq_out=fq1_clean)
