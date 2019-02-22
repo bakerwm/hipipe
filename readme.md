@@ -239,3 +239,62 @@ Alignment(fqs, path_out, smp_name, genome,
 ```
 
 
+### Change log
+
+**hipipe-rnaseq.py**
+
+split RANseq into two steps: (1) mapping and quantification, (2) de analysis
+
+directory structure:
+
+mapping
+├── gene
+│   ├── qc
+│   ├── mapping
+│   ├── bigWig
+│   ├── count
+│   └── report
+├── transposon
+│   ├── qc
+│   ├── mapping
+│   ├── bigWig
+│   ├── count
+│   └── report
+└── extra_genes
+    ├── mapping
+    ├── bigWig
+    ├── count
+    └── report
+
+de_analysis (A vs B)
+├── gene
+│   ├── bigWig
+│   ├── de_analysis (DESeq2 output)
+│   ├── GO_analysis (plots, tables, clusterProfiler, Reactome)
+│   └── report (DE gene list)
+├── transposon
+│   ├── bigWig
+│   ├── de_analysis
+│   └── report
+└── extra_genes
+    ├── bigWig
+    ├── de_analysis
+    └── report
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
