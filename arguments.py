@@ -2,6 +2,7 @@
 """
 Prepare arguments for goldclip pipeline
 """
+import pathlib
 
 def args_init(args=None, demx=False, trim=True, align=True, call_peak=False):
         """Inititate the arguments, assign the default values to arg
@@ -16,7 +17,7 @@ def args_init(args=None, demx=False, trim=True, align=True, call_peak=False):
 
         args['fq1'] = args.get('fq1', None)
         args['fq2'] = args.get('fq2', None)
-        args['path_out'] = args.get('path_out', None)
+        args['path_out'] = args.get('path_out', str(pathlib.Path.cwd()))
 
         ## optional
         args['genome_path'] = args.get('genome_path', None)
