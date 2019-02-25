@@ -223,9 +223,20 @@ class Alignment_reporter(object):
                 universal_newlines=True,
                 preexec_fn=os.setsid)
             logging.info('run_shell_cmd: CMD={}'.format(cmd))
+            ret = ''
+            while True:
+                line = p.stdout.readline()
+                if line == '' and p.poll() is not None:
+                    break
+                if line:
+                    ret += line
+            if p.returncode > 0:
+                raise subprocess.CalledProcessError(
+                    p.returncode, cmd)
+            return ret.strip('\n')
         except:
              raise Exception('Killed CMD={}\nSTDOUT={}'.format(
-                 cmd, ret))
+                 cmd, subprocess.PIPE))
 
 
     def run(self):
