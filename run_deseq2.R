@@ -33,7 +33,8 @@ if(dir.exists(input)) {
   path_de <- input
 } else if(file.exists(input)) {
   print("run DESeq2 analysis")
-  path_de <- file.path(output, "de_analysis")
+#  path_de <- file.path(output, "de_analysis")
+  path_de <- output
   DESeq2_for_featureCounts(input, organism, path_de, pvalue_cutoff = 0.1)
 }
 
