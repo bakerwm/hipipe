@@ -4,7 +4,7 @@ Prepare arguments for goldclip pipeline
 """
 import pathlib
 
-def args_init(args=None, demx=False, trim=True, align=True, call_peak=False):
+def args_init(args=None, demx=False, trim=False, align=False, call_peak=False):
         """Inititate the arguments, assign the default values to arg
         positional arg: smp, genome
         """
@@ -59,15 +59,20 @@ def args_init(args=None, demx=False, trim=True, align=True, call_peak=False):
 
         ## alignment
         if align:
+            args['genome'] = args.get('genome', None)
             args['spikein'] = args.get('spikein', None)
             args['index_ext'] = args.get('index_ext', None)
+            args['extra_index'] = args.get('extra_index', None)
             args['unique_only'] = args.get('unique_only', True) # unique map
             args['aligner'] = args.get('aligner', 'bowtie') # bowtie alignment
-            args['align-to-rRNA'] = args.get('align-to-rRNA', True)
             args['n_map'] = args.get('n_map', 0)
             args['align_to_rRNA'] = args.get('align_to_rRNA', True)
             args['repeat_masked_genome'] = args.get('repeat_masked_genome', False)
             args['merge_rep'] = args.get('merge_rep', True)
+
+            # check-point
+            if args['spikein'] == args['genome']:
+                args['spikein'] = None
 
         ## peak-calling
         if call_peak:
@@ -138,6 +143,7 @@ default_arguments = {
 }
 
 
+# decrepted
 class Argument(object):
     """Pre-defined arguments for goldclip analysis
     triming

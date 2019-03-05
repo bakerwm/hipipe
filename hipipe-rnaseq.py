@@ -99,7 +99,7 @@ import subprocess
 import pysam
 from arguments import args_init
 from helper import *
-from alignment import Alignment, Alignment_log, Alignment_stat
+from alignment import AlignIndex, Alignment, Alignment_log, Alignment_stat
 from hipipe_reporter import QC_reporter, Alignment_reporter
 
 
@@ -281,54 +281,65 @@ def mapping_gene(fq_files, smp_name, args):
     """Mapping reads to genome
     control or treatment
     args dict, the arguments of pipeline
+    check index
+    1. rRNA
+    2. genome
+    3. spike-in-rRNA
+    4. spike-in
+
     """
     project_path = init_rnaseq_project(args['path_out'], analysis_type=1)
     mapping_gene_path = project_path['gene']
 
     ## qc-report
     qc_path = os.path.join(mapping_gene_path['report'], 'qc')
-    QC_reporter(fq_files, qc_path).run()
+    # QC_reporter(fq_files, qc_path).run()
 
     ## update args
-    args_map = args.copy() # make a copy dict
-    tmp1 = args_map.pop('fq1', None) # remove 'fq1' from args
-    tmp2 = args_map.pop('path_out', None) # remove 'path_out' from args
-    tmp3 = args_map.pop('smp_name', None) # remove 'smp_name' form args
+    # args_map = args.copy() # make a copy dict
+    tmp1 = args.pop('fq1', None) # remove 'fq1' from args
+    tmp2 = args.pop('path_out', None) # remove 'path_out' from args
+    aligner = args.pop('aligner', None) # remove aligner
+    genome = args.pop('genome', None) # remove genome
+    tmp4 = args.pop('smp_name', None) # remove 'smp_name' form args
 
-    map_bam_files, map_bam_ext_files = Alignment(
-        fq1=fq_files, 
-        path_out=mapping_gene_path['mapping'], 
-        smp_name=smp_name, 
-        **args_map).run()
+    ## determine the index
+    Alignment(
+        fq1=fq_files,
+        path_out=mapping_gene_path['mapping'],
+        aligner=aligner,
+        smp_name=smp_name,
+        genome=genome,
+        **args).run()
 
-    ## mapping-report
-    map_report_path = os.path.join(mapping_gene_path['report'], 'mapping')
-    map_path_list = [mapping_gene_path['mapping'], ]
-    Alignment_reporter(map_path_list, map_report_path).run()
+    # ## mapping-report
+    # map_report_path = os.path.join(mapping_gene_path['report'], 'mapping')
+    # map_path_list = [mapping_gene_path['mapping'], ]
+    # Alignment_reporter(map_path_list, map_report_path).run()
     
-    ## create bigWig files
-    map_bw_path = mapping_gene_path['bigWig']
-    for bam in map_bam_files:
-        bam2bigwig(
-            bam=bam, 
-            genome=args['genome'], 
-            path_out=map_bw_path, 
-            strandness=args['s'], 
-            binsize=args['bin_size'],
-            overwrite=args['overwrite'])
+    # ## create bigWig files
+    # map_bw_path = mapping_gene_path['bigWig']
+    # for bam in map_bam_files:
+    #     bam2bigwig(
+    #         bam=bam, 
+    #         genome=args['genome'], 
+    #         path_out=map_bw_path, 
+    #         strandness=args['s'], 
+    #         binsize=args['bin_size'],
+    #         overwrite=args['overwrite'])
 
-    ## count
-    count_path = mapping_gene_path['count']
-    count_file = os.path.join(count_path, 'count.txt')
-    ## only kepp replicates
-    map_bam_files = [f for f in map_bam_files if '_rep' in f]
-    run_featureCounts(
-        gtf=args['gtf'], 
-        bam_files=map_bam_files, 
-        out=count_file, 
-        strandness=args['s'], 
-        threads=args['threads'], 
-        overwrite=args['overwrite'])
+    # ## count
+    # count_path = mapping_gene_path['count']
+    # count_file = os.path.join(count_path, 'count.txt')
+    # ## only kepp replicates
+    # map_bam_files = [f for f in map_bam_files if '_rep' in f]
+    # run_featureCounts(
+    #     gtf=args['gtf'], 
+    #     bam_files=map_bam_files, 
+    #     out=count_file, 
+    #     strandness=args['s'], 
+    #     threads=args['threads'], 
+    #     overwrite=args['overwrite'])
 
 
 def mapping_te(args):
@@ -435,6 +446,10 @@ def main():
     ## default values
     args['unique_only'] = True
     args['align_to_rRNA'] = True
+
+    if args['genome_path'] is None:
+        args['genome_path'] = os.path.join(str(pathlib.Path.home()), 'data', 'genome')
+
     if args['gtf'] is None:
         args['gtf'] = Genome(args['genome'], 
             genome_path=args['genome_path']).gene_gtf('ensembl')
@@ -460,35 +475,35 @@ def main():
     if args['C'] is None:
         args['C'] = ctl_prefix
     ## path to control
-    ctl_args['path_out'] = os.path.join(args['path_out'], args['C'])
-    # mapping_gene(ctl_fqs, args['C'], ctl_args)
+    ctl_args['path_out'] = os.path.join(args['path_out'], args['C']) 
+    mapping_gene(ctl_fqs, args['C'], ctl_args)
 
-    ## treatment, args['t']
-    tre_args = args.copy()
-    tre_fqs = tre_args['t']
-    tre_prefix = str_common([os.path.basename(f) for f in tre_fqs])
-    tre_prefix = tre_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
-    if args['T'] is None:
-        args['T'] = tre_prefix
-    ## path to treatment
-    tre_args['path_out'] = os.path.join(args['path_out'], args['T'])
+    # ## treatment, args['t']
+    # tre_args = args.copy()
+    # tre_fqs = tre_args['t']
+    # tre_prefix = str_common([os.path.basename(f) for f in tre_fqs])
+    # tre_prefix = tre_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
+    # if args['T'] is None:
+    #     args['T'] = tre_prefix
+    # ## path to treatment
+    # tre_args['path_out'] = os.path.join(args['path_out'], args['T'])
 
-    ## de_analysis
-    ## gene, transposon, extra_genes
-    de_args = args.copy()
-    de_path = os.path.join(args['path_out'], args['C'] + '_vs_' + args['T'])
-    is_path(de_path)
+    # ## de_analysis
+    # ## gene, transposon, extra_genes
+    # de_args = args.copy()
+    # de_path = os.path.join(args['path_out'], args['C'] + '_vs_' + args['T'])
+    # is_path(de_path)
 
-    ## gene
-    count_ctl = os.path.join(ctl_args['path_out'], 'gene', 'count', 'count.txt')
-    count_tre = os.path.join(tre_args['path_out'], 'gene', 'count', 'count.txt')
-    gene_de_path = de_path
-    run_deseq2(
-        control=count_ctl,
-        treatment=count_tre,
-        path_out=de_path,
-        genome=args['genome'],
-        group='gene')
+    # ## gene
+    # count_ctl = os.path.join(ctl_args['path_out'], 'gene', 'count', 'count.txt')
+    # count_tre = os.path.join(tre_args['path_out'], 'gene', 'count', 'count.txt')
+    # gene_de_path = de_path
+    # run_deseq2(
+    #     control=count_ctl,
+    #     treatment=count_tre,
+    #     path_out=de_path,
+    #     genome=args['genome'],
+    #     group='gene')
 
     
 

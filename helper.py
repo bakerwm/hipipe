@@ -870,6 +870,11 @@ class BAM(object):
         pass
 
 
+    def merge(self):
+        """Merge multiple BAM files"""
+        pass
+
+
     def count(self):
         """Count reads in BAM file"""
         return pysam.view('-c', self.fn)

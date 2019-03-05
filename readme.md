@@ -282,6 +282,42 @@ de_analysis (A vs B)
     └── report
 
 
+## Alignment
+
+**Requirements**
+
++ 1. fastq names, fq, and also *.gz file  
++ 2. multiple organisms: dm3, hg19, mm10, ... (require build_genome.py)  
++ 3. create alignment report (txt, html)
+
+**arguments**
+
+required
++ 1. fastq file(s)  
++ 2. genome  
++ 3. output_dir  
+
+optional
++ 1. unique-only  
++ 2. map-to-rRNA  
++ 3. n-map  
++ 4. repeat_masked_genome
++ 5. merge_replicates  
++ 6. spike-in  
++ 7. extra_reference  
+
+**input**
+
++ 1. fastq  
++ 2. index  
++ 3. out_filename   
++ 4. arguments (unique, n-map, threads, ...)
+
+**output**
+
++ 1. map_bam  
++ 2. unmap_fq  
+
 
 
 
