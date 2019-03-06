@@ -29,32 +29,31 @@ class AlignIndex(object):
     """1. Pick the index for aligner
     2. validate index
     """
-    def __init__(self, aligner, index=None, genome=None, 
-        rRNA=False, repeat_masked_genome=False, **kwargs):
+    def __init__(self, aligner, genome=None, index=None, 
+        align_to_rRNA=False, align_to_te=False, 
+        repeat_masked_genome=False, **kwargs):
         """input index, or genome
         index path to the index
         genome name of the genome
         priority: index > genome > rRNA > repeat_mask
         """
         args = args_init(kwargs, align=True)
-        tmp0 = args.pop('aligner')
-        tmp1 = args.pop('genome')
-        tmp2 = args.pop('repeat_masked_genome')
-        ##
-        self.aligner = aligner
-        self.index = index
-        self.genome = genome
-        self.rRNA = rRNA
-        self.repeat_masked_genome = repeat_masked_genome
+        # update arguments
+        args['aligner'] = aligner
+        args['genome'] = genome
+        args['index'] = index # ?
+        args['align_to_rRNA'] = align_to_rRNA 
+        args['align_to_te'] = align_to_te
+        args['repeat_masked_genome'] = repeat_masked_genome
+
         self.args = args
 
-        ## determine priority
         ## fetch the index_name
         if isinstance(index, str):
             tag = self.index_validator(index, aligner)
         elif index is None:
             if isinstance(genome, str):
-                tag = self.index_finder(aligner, rRNA, repeat_masked_genome)
+                tag = self.index_finder()
             elif genome is None:
                 raise Exception('either index= or genome=, is required')
             else:
@@ -62,7 +61,6 @@ class AlignIndex(object):
         else:
             raise Exception('unknown argument, index=, expect NoneType or str')
         self.tag = tag
-
 
 
     def get_index(self):
@@ -85,12 +83,12 @@ class AlignIndex(object):
         /path-to-data/genome/dm3/dm3_transposon/STAR_index/
         """
         args = self.args.copy()
-        index_base = os.path.basename(self.index)
+        index_base = os.path.basename(args['index'])
 
         if index_base == 'STAR_index':
-            prefix = os.path.basename(os.path.dirname(self.index))
+            prefix = os.path.basename(os.path.dirname(args['index']))
         elif index_base == 'genome':
-            prefix = os.path.basename(os.path.dirname(os.path.dirname(self.index)))
+            prefix = os.path.basename(os.path.dirname(os.path.dirname(args['index'])))
         else:
             prefix = index_base
         return prefix
@@ -130,7 +128,7 @@ class AlignIndex(object):
         return flag
 
 
-    def index_finder(self, aligner, rRNA=False, repeat_masked_genome=False):
+    def index_finder(self):
         """Find the index for aligner: STAR, bowtie, bowtie2
         if rRNA is True, return the rRNA index only
         if return None, the index not found, or file not exists
@@ -151,28 +149,128 @@ class AlignIndex(object):
         """
         args = self.args.copy()
 
+        # te
+        if args['align_to_te']:
+            # choose TE index
+            index = os.path.join(args['genome_path'], 
+                args['genome'], 
+                args['aligner'] + '_index', 
+                args['genome'] + '_transposon')
         # rRNA
-        if rRNA:
+        elif args['align_to_rRNA']:
             # choose the first one
             rRNA_list = ['MT_trRNA', 'rRNA']
-            index_rRNA = [os.path.join(args['genome_path'], self.genome, aligner + '_index', i) for i in rRNA_list]
-            index_rRNA = [i for i in index_rRNA if self.index_validator(i, aligner)]
+            index_rRNA = [os.path.join(args['genome_path'], 
+                args['genome'], 
+                args['aligner'] + '_index', i) for i in rRNA_list]
+            index_rRNA = [i for i in index_rRNA if self.index_validator(i, args['aligner'])]
             if len(index_rRNA) >= 1:
                 index = index_rRNA[0]
             else:
                 index = None
         # genome
         else:
-            if repeat_masked_genome:
+            if args['repeat_masked_genome']:
                 tag = 'genome_rm'
             else:
                 tag = 'genome'
-            index = os.path.join(args['genome_path'], self.genome, aligner + '_index', tag)
+            index = os.path.join(args['genome_path'], 
+                args['genome'], 
+                args['aligner'] + '_index', 
+                tag)
 
         # validate
-        if not self.index_validator(index, aligner):
+        if not self.index_validator(index, args['aligner']):
             index = None
         return index
+
+
+class AlignIndexBuilder(object):
+    """Create alignment indexes
+    genome + spikein
+    transposon
+    extra
+    : arguments :
+    1. genomme (str), spikein (str|None), align_to_rRNA (True|False)
+    2. align_to_te (True|False), te_index (str|None) (mapping)
+    3. extra_index (str|None)
+    """
+    def __init__(self, aligner, genome=None, spikein=None, 
+        align_to_rRNA=True, align_to_te=True, te_index=None,
+        extra_index=None, **kwargs):
+        """Mulitple index"""
+        args = args_init(kwargs, align=True)
+
+        ## update arguments
+        args['aligner'] = aligner
+        args['genome'] = genome
+        args['spikein'] = spikein
+        args['align_to_rRNA'] = align_to_rRNA
+        args['align_to_te'] = align_to_te
+        args['te_index'] = te_index
+        args['extra_index'] = extra_index
+        self.args = args
+
+
+    def index_builder(self):
+        """Create index, order
+        default:
+        1. genome_rRNA, genome, spikein_rrNA, spikein
+        2. extra_index1
+        3. extra_index2
+        ...
+        """
+        args = self.args.copy()
+
+        align_to_te = args.pop('align_to_te')
+
+        # group1 - extra
+        if args['extra_index']: # True
+            index_group = [AlignIndex(index=i, **args).get_index() for i in args['extra_index']]
+        # group2 - te
+        elif align_to_te:
+            if args['te_index']:
+                index_group = [AlignIndex(index=args['te_index'], **args).get_index()]
+            else:
+                index_group = [AlignIndex(align_to_te=True, **args).get_index()]
+        # group3 - genome + spikein
+        elif isinstance(args['genome'], str): # genome, required
+            ## nested list
+            index_genome = None
+            index_rRNA = None
+            index_sp = None
+            index_sp_rRNA = None
+            ## genome
+            align_to_rRNA = args.pop('align_to_rRNA')
+            index_genome = AlignIndex(align_to_rRNA=False, **args).get_index()
+            if align_to_rRNA: # align to rRNA
+                index_rRNA = AlignIndex(align_to_rRNA=True, **args).get_index()
+            # spikein
+            if isinstance(args['spikein'], str):
+                args['genome'] = args['spikein'] # update
+                index_sp = AlignIndex(align_to_rRNA=False, **args).get_index()
+                if align_to_rRNA: # align to rRNA
+                    index_sp_rRNA = AlignIndex(align_to_rRNA=True, **args).get_index()
+            index_group = [index_rRNA, index_genome, index_sp_rRNA, index_sp]
+        else:
+            raise Exception('align index failed, check: -g, -k, -x, --align-to-te, --te-index')
+
+        # check
+        index_n = sum([x is not None for x in index_group])
+
+        # return
+        if index_n == 0:
+            raise Exception('align index error, check: -g, -k, -x, --align-to-te, --te-index')
+
+        return index_group
+
+
+    def get_index(self):
+        """Choose index
+        priority:
+        extra > te > genome + spikein
+        """
+        return self.index_builder()
 
 
 class AlignNode(object):
@@ -192,18 +290,15 @@ class AlignNode(object):
         ## default arguments
         args = args_init(kwargs, align=True)
         
-        ## global variables
-        tmp0 = args.pop('fq1')
-        tmp1 = args.pop('path_out')
-        tmp2 = args.pop('aligner')
-        self.fq1 = fq1
-        self.path_out = path_out
-        self.aligner = aligner
-        self.index = index
-        self.smp_name = smp_name # names for merge name of replicates
+        ## update arguments
+        args['fq1'] = fq1
+        args['path_out'] = path_out
+        args['aligner'] = aligner
+        args['index'] = index
+        args['smp_name'] = smp_name
 
         ## check index 
-        assert AlignIndex(aligner=aligner, index=index, **args).get_index()
+        assert AlignIndex(**args).get_index()
 
         ## check aligner
         aligner_dict = {
@@ -213,11 +308,11 @@ class AlignNode(object):
        
         aligner_exe = aligner_dict.get(aligner, None)
         if not aligner_exe:
-            raise Exception('unknown aligner: %s' % self.aligner)
+            raise Exception('unknown aligner: %s' % aligner)
         self.aligner_exe = aligner_exe
 
         ## return dict
-        self.kwargs = args
+        self.args = args
 
 
     def align_init(self):
@@ -229,19 +324,18 @@ class AlignNode(object):
         return files:
         prefix, bam, bed, log, unmap
         """
-        args = self.kwargs.copy()
+        args = self.args.copy()
 
         ## prefix
-        fq_prefix = file_prefix(self.fq1)[0]
+        fq_prefix = file_prefix(args['fq1'])[0]
         fq_prefix = re.sub('\.clean|\.nodup|\.cut', '', fq_prefix)
-        if(len(self.fq1) == 1 and not self.smp_name is None):
-            fq_prefix = self.smp_name
-
-        fq_type = seq_type(self.fq1)
+        if(len(args['fq1']) == 1 and not args['smp_name'] is None):
+            fq_prefix = args['smp_name']
+        fq_type = seq_type(args['fq1'])
 
         ## sub directory
-        index_name = AlignIndex(aligner=self.aligner, index=self.index, **args).get_index_name()
-        align_path = os.path.join(self.path_out, fq_prefix + '.map_' + index_name)
+        index_name = AlignIndex(**args).get_index_name()
+        align_path = os.path.join(args['path_out'], fq_prefix + '.map_' + index_name)
         assert is_path(align_path)
 
         ## output files
@@ -255,7 +349,7 @@ class AlignNode(object):
 
     def wrap_log(self, log):
         """Wrapper alignment log file, save as json"""
-        args = self.kwargs.copy()
+        args = self.args.copy()
         j_file = Alignment_log(log, args['unique_only']).saveas() # save as json
 
 
@@ -270,7 +364,7 @@ class AlignNode(object):
         arguments:
         reference: genome, genome_rRNA, spikein, spikein_rRNA
         """
-        args = self.kwargs.copy()
+        args = self.args.copy()
         bowtie_exe = which('bowtie')
 
         # output
@@ -296,7 +390,7 @@ class AlignNode(object):
         else:
             c1 = '%s %s %s -p %s --mm --best --sam --no-unal --un %s %s \
                 %s' % (bowtie_exe, para_fq, para_unique, args['threads'], 
-                    unmap_fq, index, self.fq1)
+                    unmap_fq, index, args['fq1'])
             c2 = 'samtools view -bhS -F 0x4 -@ %s -' % args['threads']
             c3 = 'samtools sort -@ %s -o %s -' % (args['threads'], map_bam)
             with open(map_log, 'wt') as ff:
@@ -326,7 +420,7 @@ class AlignNode(object):
         arguments:
         reference: genome, genome_rRNA, spikein, spikein_rRNA
         """
-        args = self.kwargs.copy()
+        args = self.args.copy()
         bowtie2_exe = which('bowtie2')
 
         # output directory
@@ -358,7 +452,7 @@ class AlignNode(object):
             logging.info('bam file exists: %s' % map_bam)
         else:
             c1 = '%s %s -p %s --very-sensitive-local --mm --no-unal --un %s -x %s -U %s' % (bowtie2_exe, 
-                para_fq, args['threads'], unmap_fq, index, self.fq1)
+                para_fq, args['threads'], unmap_fq, index, args['fq1'])
             c2 = 'samtools view -bhS -F 0x4 -@ %s %s -' % (args['threads'], para_unique)
             c3 = 'samtools sort -@ %s -o %s -' % (args['threads'], map_bam)
             with open(map_log, 'wt') as ff:
@@ -384,7 +478,7 @@ class AlignNode(object):
         
         use '--outFilterMultimapNmax' to control uniquely mapped reads
         """
-        args = self.kwargs.copy()
+        args = self.args.copy()
         star_exe = which('STAR')
 
         # output directory
@@ -398,7 +492,7 @@ class AlignNode(object):
             n_map = 10 # STAR default: 10
         para_unique = '--outFilterMultimapNmax %s' % n_map
 
-        file_reader = 'zcat' if is_gz(self.fq1) else '-'
+        file_reader = 'zcat' if is_gz(args['fq1']) else '-'
 
         # file exists
         map_prefix = os.path.splitext(map_bam)[0]
@@ -417,7 +511,7 @@ class AlignNode(object):
               --outSAMtype BAM SortedByCoordinate \
               --outFilterMismatchNoverLmax 0.07 \
               --seedSearchStartLmax 20 \
-              --outReadsUnmapped Fastx %s %s' % (self.index, self.fq1, file_reader, map_prefix, 
+              --outReadsUnmapped Fastx %s %s' % (args['index'], args['fq1'], file_reader, map_prefix, 
                 args['threads'], unmap_fq, para_unique)
             p1 = subprocess.run(shlex.split(c1))
             
@@ -477,181 +571,100 @@ class AlignNode(object):
         return [map_bam, unmap_file]
 
 
-class AlignIndexes(object):
-    """Alignment 1 fastq files to multiple index
+class AlignHub(object):
+    """Alignment 1 fastq file to multiple indexes
     multiple fastq
     multiple index (sequential)
     """
-    def __init__(self, fq1, path_out, aligner, smp_name=None, 
-        genome=None, **kwargs):
-        """Mulitple index"""
+    def __init__(self, fq1, path_out, aligner, index_list,
+        smp_name=None, align_by_order=True, **kwargs):
+        """Mulitple indexes"""
+        assert isinstance(index_list, list)
         args = args_init(kwargs, align=True)
-        tmp0 = args.pop('fq1')
-        tmp1 = args.pop('path_out')
-        tmp2 = args.pop('aligner')
-        #tmp3 = args.pop('smp_name')
-        tmp4 = args.pop('genome')
-        self.fq1 = fq1
-        self.path_out = path_out
-        self.aligner = aligner
-        self.smp_name = smp_name # names for merge name of replicates
-        self.genome = genome
+
+        ## udpate arguments
+        args['fq1'] = fq1
+        args['path_out'] = path_out
+        args['aligner'] = aligner
+        args['smp_name'] = smp_name
+
+        self.index_list = index_list
+        self.align_by_order = align_by_order
         self.args = args
 
-
-    def index_init(self):
-        """Create index, order
-        default:
-        1. genome_rRNA, genome, spikein_rrNA, spikein
-        2. extra_index1
-        3. extra_index2
-        ...
-        """
-        args = self.args.copy()
-
-        ## nested list
-        index_genome = None
-        index_rRNA = None
-        index_sp = None
-        index_sp_rRNA = None
-        # aligner = args.pop('aligner')
-        # genome = args.pop('genome')
-        rRNA = args.pop('align_to_rRNA')
-        spikein = args.pop('spikein')
         
-        # group1 - genome
-        if isinstance(self.genome, str):
-            index_genome = AlignIndex(aligner=self.aligner, genome=self.genome, **args).get_index()
-            if rRNA: # align to rRNA
-                index_rRNA = AlignIndex(aligner=self.aligner, genome=self.genome,
-                    rRNA=rRNA, **args).get_index()
-        # group1 - spikein
-        if isinstance(spikein, str):
-            index_sp = AlignIndex(aligner=self.aligner, genome=spikein, **args).get_index()
-            if rRNA: # align to rRNA
-                index_sp_rRNA = AlignIndex(aligner=self.aligner, 
-                    genome=spikein, rRNA=rRNA, **args).get_index()
-        index_group1 = [index_genome, index_rRNA, index_sp, index_sp_rRNA]
-
-        # group2 - extra
-        if args['extra_index'] is None:
-            index_group2 = []
-        else:
-            index_group2 = [AlignIndex(aligner=self.aligner, index=i, **args).get_index() for i in args['extra_index']]
-
-        # check
-        n1 = sum([x is not None for x in index_group1])
-        n2 = sum([x is not None for x in index_group2])
-
-        # return
-        if index_genome is None and n2 == 0:
-            raise Exception('align index error, check: -g, -k, -x')
-
-        return [index_group1, index_group2]
-
-        
-    def align_se_batch(self, fq_in, path_out):
+    def align_se_batch(self):
         """Alignment 1 fastq file to multiple index,
         priority:
         extra_index > genome
         """
         args = self.args.copy()
-        index_list = self.index_init() # genome, extra
 
-        # list of indexes
-        n1 = sum([x is not None for x in index_list[0]]) # genome
-        n2 = sum([x is not None for x in index_list[1]]) # extra
-
-        ## extra, priority=1
+        ## output
         map_files = []
-        if n2 > 0:
-            fq_x_in = fq_in
-            for k in index_list[1]:
-                if k is None:
-                    continue
-                x_bam, x_unmap = AlignNode(
-                    fq1=fq_x_in,
-                    path_out=path_out,
-                    aligner=self.aligner,
-                    index=k,
-                    smp_name=self.smp_name,
-                    **args).run()
-                fq_x_in = x_unmap
-                map_files.append(x_bam)
-            ## check-point
-            if len(map_files) == 0:
-                raise Exception('align to extra_index failed, -x:')
-        else:
-        ## genome
-            fq_x_in = fq_in
-            for i in index_list[0]:
-                if i is None:
-                    continue
-                i_bam, i_unmap = AlignNode(
-                    fq1=fq_x_in,
-                    path_out=path_out,
-                    aligner=self.aligner,
-                    index=i,
-                    smp_name=self.smp_name,
-                    **args).run()
-                fq_x_in = i_unmap
-                ## return
-                if index_list[0].index(i) == 0: # 1st, map genome
-                    map_files = i_bam 
+        for x in self.index_list:
+            if x is None:
+                continue
+            args['index'] = x
+            x_bam, x_unmap = AlignNode(**args).run()
+            if self.align_by_order:
+                args['fq1'] = x_unmap
+            map_files.append(x_bam)
 
         return map_files
 
 
-    # def get_bam_files(self):
-    #     """Return the bam files
-    #     genome_rRNA, genome, spikein_rRNA, spikein, extra_index
-    #     """
-    #     args = self.args.copy()
-    #     # index_list = self.index_init()
-
-    #     # n1 = sum([x is not None for x in index_list[0]]) # genome
-    #     # n2 = sum([x is not None for x in index_list[1]]) # extra
-
-    #     # ## extra
-    #     # map_files = []
-    #     # return True
-    #     pass
-
-
     def run(self):
         """run alignment"""
-        map_files = self.align_se_batch(self.fq1, self.path_out)
+        map_files = self.align_se_batch()
 
 
 class Alignment(object):
-    """Run alignment"""
-
+    """Run alignment
+    :args fq1
+    :args path_out
+    :args aligner
+    :args smp_name
+    :args genome
+    :args spikein
+    :args align_to_te
+    :args te_index
+    :args extra_index
+    :args repeat_masked_genome
+    :args genome_path
+    """
     def __init__(self, fq1, path_out, aligner, smp_name=None, 
-        genome=None, **kwargs):
+        genome=None, align_by_order=True, **kwargs):
         """Mulitple index"""
         args = args_init(kwargs, align=True)
 
-        tmp0 = args.pop('fq1')
-        tmp1 = args.pop('path_out')
-        tmp2 = args.pop('aligner')
-        tmp3 = args.pop('genome')
+        ## update arguments
+        args['fq1'] = fq1
+        # args['path_out'] = path_out
+        args['aligner'] = aligner
+        args['smp_name'] = smp_name
+        args['genome'] = genome
+        args['align_by_order'] = align_by_order
+
+        ## create index
+        args['index_list'] = AlignIndexBuilder(**args).get_index()
         self.fq1 = fq1
-        self.path_out = path_out
-        self.aligner = aligner
-        self.smp_name = smp_name # names for merge name of replicates
-        self.genome = genome
+        self.path_out = path_out # original path_out
         self.args = args
 
 
     def run(self):
-        # print(self.args)
         args = self.args.copy()
+
         map_files = []
         for fq_in in self.fq1:
             fq_prefix = file_prefix(fq_in)[0]
             fq_prefix = re.sub('\.clean|\.nodup|\.cut', '', fq_prefix)
             fq_path_out = os.path.join(self.path_out, fq_prefix)
-            bam_files = AlignIndexes(fq_in, fq_path_out, self.aligner, self.smp_name, self.genome, **args).run()
+            ## update arguments
+            args['fq1'] = fq_in
+            args['path_out'] = fq_path_out
+            bam_files = AlignHub(**args).run()
             map_files.append(bam_files)
 
         return map_files

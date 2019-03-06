@@ -2,6 +2,7 @@
 """
 Prepare arguments for goldclip pipeline
 """
+import os
 import pathlib
 
 def args_init(args=None, demx=False, trim=False, align=False, call_peak=False):
@@ -20,7 +21,10 @@ def args_init(args=None, demx=False, trim=False, align=False, call_peak=False):
         args['path_out'] = args.get('path_out', str(pathlib.Path.cwd()))
 
         ## optional
+        genome_path = os.path.join(str(pathlib.Path.home()), 'data', 'genome')
         args['genome_path'] = args.get('genome_path', None)
+        if args['genome_path'] is None:
+            args['genome_path'] = genome_path
         args['overwrite'] = args.get('overwrite', False)
         args['threads'] = args.get('threads', 8)
 
@@ -65,6 +69,9 @@ def args_init(args=None, demx=False, trim=False, align=False, call_peak=False):
             args['extra_index'] = args.get('extra_index', None)
             args['unique_only'] = args.get('unique_only', True) # unique map
             args['aligner'] = args.get('aligner', 'bowtie') # bowtie alignment
+            args['te_index'] = args.get('te_index', None) #
+            # args['align_to_te'] = args.get('align_to_te', False) #
+            args['align_by_order'] = args.get('align_by_order', True) # align reads to multiple index by order
             args['n_map'] = args.get('n_map', 0)
             args['align_to_rRNA'] = args.get('align_to_rRNA', True)
             args['repeat_masked_genome'] = args.get('repeat_masked_genome', False)
