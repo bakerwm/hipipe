@@ -118,7 +118,7 @@ def get_args():
     parser.add_argument('-k', '--spikein', default=None, 
         choices=[None, 'dm3', 'hg19', 'hg38', 'mm10'],
         help='Spike-in genome : dm3, hg19, hg38, mm10, default: None')
-    parser.add_argument('-x', '--index_ext', nargs='+', dest='index_ext',
+    parser.add_argument('-x', '--extra-index', nargs='+', dest='extra_index',
         help='Provide extra alignment index(es) for alignment, support multiple\
         indexes. eg. Transposon, tRNA, rRNA and so on.')
     parser.add_argument('--gtf', default=None,
@@ -151,6 +151,8 @@ def get_args():
 
 def init_rnaseq_project(x, analysis_type=1):
     """Create directories for RNAseq project
+    :args analysis_type, 1 mapping
+    :args analysis_tyep, 2 de_analysis
     x str, path to directory of project
     analysis_type int, 1=mapping, 2=de_analysis
     group 1, 1=gene, 2=te, 3=other
@@ -164,16 +166,16 @@ def init_rnaseq_project(x, analysis_type=1):
     group_dict = {
         1: 'gene',
         2: 'transposon',
-        3: 'extra_genes'
+        3: 'extra'
     }
 
     # choose A or B
-    path = path_dict.get(analysis_type, None)
-    if path is None:
+    sub_path = path_dict.get(analysis_type, None)
+    if sub_path is None:
         raise Exception('rnaseq-group, expect 1 or 2, not None')
 
     # create directories
-    prj_path = []
+    project_path = []
     out_dict = collections.defaultdict(dict)
     for group in [1, 2, 3]:
         # group
@@ -181,14 +183,12 @@ def init_rnaseq_project(x, analysis_type=1):
         if group_name is None:
             raise Exception('[1,2,3] for group supported')
         # path
-        for p in path:
-            path_path = os.path.join(x, group_name, p)
-            prj_path.append(path_path)
-            is_path(path_path)
-
-        # save as dict    
-        for n, p in zip(path, prj_path):
-            out_dict[group_name][n] = p
+        for p in sub_path:
+            p_path = os.path.join(x, group_name, p)
+            is_path(p_path)
+            project_path.append(p_path)
+            # save to dict
+            out_dict[group_name][p] = p_path
 
     # return values
     return out_dict
@@ -286,7 +286,6 @@ def mapping_gene(fq_files, smp_name, args):
     2. genome
     3. spike-in-rRNA
     4. spike-in
-
     """
     project_path = init_rnaseq_project(args['path_out'], analysis_type=1)
     mapping_gene_path = project_path['gene']
@@ -296,21 +295,15 @@ def mapping_gene(fq_files, smp_name, args):
     # QC_reporter(fq_files, qc_path).run()
 
     ## update args
-    # args_map = args.copy() # make a copy dict
-    tmp1 = args.pop('fq1', None) # remove 'fq1' from args
-    tmp2 = args.pop('path_out', None) # remove 'path_out' from args
-    aligner = args.pop('aligner', None) # remove aligner
-    genome = args.pop('genome', None) # remove genome
-    tmp4 = args.pop('smp_name', None) # remove 'smp_name' form args
+    args['fq1'] = fq_files
+    args['path_out'] = mapping_gene_path['mapping']
+    args['smp_name'] = smp_name
+    args['align_to_te'] = False
 
-    ## determine the index
-    Alignment(
-        fq1=fq_files,
-        path_out=mapping_gene_path['mapping'],
-        aligner=aligner,
-        smp_name=smp_name,
-        genome=genome,
-        **args).run()
+    ## run alignment
+    map_bam = Alignment(**args).run()
+
+    ## mrege replicates
 
     # ## mapping-report
     # map_report_path = os.path.join(mapping_gene_path['report'], 'mapping')
@@ -342,35 +335,64 @@ def mapping_gene(fq_files, smp_name, args):
     #     overwrite=args['overwrite'])
 
 
-def mapping_te(args):
-    """Mapping reads to transposon censensus
-    only support dm3, currently
+def mapping_te(fq_files, smp_name, args):
+    """Mapping reads to genome
+    control or treatment
     args dict, the arguments of pipeline
+    check index
+    1. rRNA
+    2. genome
+    3. spike-in-rRNA
+    4. spike-in
     """
-    if not args['genome'] == 'dm3':
-        logging.warning('Only support TE analysis for dm3 genome')
-        return None
-
-    project_path = init_rnaseq_project(args['path_out'], group=2) # group =1, 2
+    project_path = init_rnaseq_project(args['path_out'], analysis_type=1)
     mapping_te_path = project_path['transposon']
 
-    logging.info('Transposon analysis for TE')
-    te_mapping_path = mapping_te_path['mapping']
-   
-    ## mapping
-    # tre_bam_files, tre_bam_ext_files = Alignment(
-    #     fq1=tre_fqs, path_out=tre_path, smp_name=args['T'], **args_map).run()
-    te_map_bam_files = [b[0] for b in ctl_bam_ext_files] + [b[0] for b in tre_bam_ext_files]
+    ## qc-report
+    qc_path = os.path.join(mapping_te_path['report'], 'qc')
+    # QC_reporter(fq_files, qc_path).run()
 
-    ## count
-    count_path = mapping_te_path['count']
-    count_file = os.path.join(count_path, 'count.txt')
-    te_gtf = Genome(args['genome'], genome_path=args['genome_path']).te()
-    # keep only replicates bam files
-    te_map_bam_files = [f for f in te_map_bam_files if '_rep' in f]
-    run_featureCounts(gtf=te_gtf, bam_files=te_map_bam_files, 
-        out=count_file, strandness=args['s'], threads=args['threads'],
-        overwrite=args['overwrite'])
+    ## update args
+    args['fq1'] = fq_files
+    args['path_out'] = mapping_te_path['mapping']
+    args['smp_name'] = smp_name
+    args['align_to_te'] = True
+
+    ## run alignment
+    map_bam = Alignment(**args).run()
+
+    ## return
+    return map_bam
+
+
+def mapping_extra(fq_files, smp_name, args):
+    """Mapping reads to genome
+    control or treatment
+    args dict, the arguments of pipeline
+    check index
+    1. rRNA
+    2. genome
+    3. spike-in-rRNA
+    4. spike-in
+    """
+    project_path = init_rnaseq_project(args['path_out'], analysis_type=1)
+    mapping_extra_path = project_path['extra']
+
+    ## qc-report
+    qc_path = os.path.join(mapping_extra_path['report'], 'qc')
+    # QC_reporter(fq_files, qc_path).run()
+
+    ## update args
+    args['fq1'] = fq_files
+    args['path_out'] = mapping_extra_path['mapping']
+    args['smp_name'] = smp_name
+    args['align_to_te'] = False
+
+    ## run alignment
+    map_bam = Alignment(**args).run()
+
+    ## return
+    return map_bam
 
 
 def run_deseq2(control, treatment, path_out, genome, group='gene'):
@@ -441,42 +463,38 @@ def map_stat(path):
 
 def main():
     """Main for RNAseq analysis pipeline"""
-    args = args_init(vars(get_args()), trim=False, align=True)
+    args = args_init(vars(get_args()), align=True)
 
-    ## default values
+    ## default arguments, for RNAseq2 only
     args['unique_only'] = True
     args['align_to_rRNA'] = True
 
-    if args['genome_path'] is None:
-        args['genome_path'] = os.path.join(str(pathlib.Path.home()), 'data', 'genome')
-
     if args['gtf'] is None:
-        args['gtf'] = Genome(args['genome'], 
-            genome_path=args['genome_path']).gene_gtf('ensembl')
+        args['gtf'] = Genome(**args).gene_gtf('ensembl')
 
+    ## update prefix
+    ctl_prefix = str_common([os.path.basename(f) for f in args['c']])
+    ctl_prefix = ctl_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
+    if args['C'] is None:
+        args['C'] = ctl_prefix
+    tre_prefix = str_common([os.path.basename(f) for f in args['t']])
+    tre_prefix = tre_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
+    if args['T'] is None:
+        args['T'] = tre_prefix
     
     ############################################################################
     ## gene analysis
     ############################################################################
-    # project_path = init_rnaseq_project(args['path_out'], analysis_type=1)
-
-    # qc stat
-    # mapping
-    # mapping stat
-    # bigWig
-    # count
-    # de_analysis
-
     ## control, args['c']
     ctl_args = args.copy()
-    ctl_fqs = ctl_args['c']
-    ctl_prefix = str_common([os.path.basename(f) for f in ctl_fqs])
-    ctl_prefix = ctl_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
-    if args['C'] is None:
-        args['C'] = ctl_prefix
-    ## path to control
-    ctl_args['path_out'] = os.path.join(args['path_out'], args['C']) 
-    mapping_gene(ctl_fqs, args['C'], ctl_args)
+
+    ## extra, te 
+    ctl_args['align_to_te'] = False
+    ctl_args['extra_index'] = None
+
+    # update arguments
+    ctl_args['path_out'] = os.path.join(args['path_out'], args['C'])
+    mapping_gene(args['c'], args['C'], ctl_args)
 
     # ## treatment, args['t']
     # tre_args = args.copy()
@@ -505,7 +523,26 @@ def main():
     #     genome=args['genome'],
     #     group='gene')
 
-    
+    ############################################################################
+    ## te analysis
+    ############################################################################
+    ## control, args['c']
+    ctl_args = args.copy()
+
+    ## path to control
+    ctl_args['path_out'] = os.path.join(args['path_out'], args['C'])
+    # mapping_te(args['c'], args['C'], ctl_args)
+
+
+    ############################################################################
+    ## extra analysis
+    ############################################################################
+    ## control, args['c']
+    ctl_args = args.copy()
+
+    ## path to control
+    ctl_args['path_out'] = os.path.join(args['path_out'], args['C'])
+    # mapping_extra(args['c'], args['C'], ctl_args)
 
 
 
