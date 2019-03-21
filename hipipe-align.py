@@ -35,7 +35,7 @@ def get_args():
     parser.add_argument('-o', '--path_out', default=None, 
         help='The directory to save results, default, \
         current working directory.')
-    parser.add_argument('-n', '--smp_name', required=True,
+    parser.add_argument('-n', '--smp_name', required=False,
         help='Name of the experiment')
     parser.add_argument('-g', '--genome', required=True, default='hg19', 
         choices=['dm3', 'hg19', 'hg38', 'mm10', 'mm9'],
@@ -43,9 +43,11 @@ def get_args():
     parser.add_argument('-k', '--spikein', default=None, 
         choices=[None, 'dm3', 'hg19', 'hg38', 'mm10'],
         help='Spike-in genome : dm3, hg19, hg38, mm10, default: None')
-    parser.add_argument('-x', '--index_ext', nargs='+',
-        help='Provide alignment index(es) for alignment, support multiple\
-        indexes. if specified, ignore -g, -k')
+    parser.add_argument('-x', '--extra-index', nargs='+', dest='extra_index',
+        help='Provide extra alignment index(es) for alignment, support multiple\
+        indexes. eg. Transposon, tRNA, rRNA and so on. if specified, ignore -g, -k')
+    parser.add_argument('--align-to-te', dest='align_to_te', action='store_true',
+        help='Align to TE consensus sequences (only for dm3), ignore -g, -k, -x')
     parser.add_argument('--threads', default=8, type=int, 
         help='Number of threads to launch, default: 8.')
     parser.add_argument('--unique-only', action='store_true',
@@ -72,20 +74,30 @@ def get_args():
         [$HOME/data/genome/]')
     parser.add_argument('--overwrite', action='store_true',
         help='if spcified, overwrite exists file')
+    parser.add_argument('--small-genome', dest='small_genome',
+        action='store_true',
+        help='if align to small genome, over 90 percent of the reads are not aligned,\
+        should use this option for STAR alignment, to reduce the alignment time.')
     args = parser.parse_args()
     return args
 
 
 def main():
-    args = args_init(vars(get_args()), trim=False, align=True, call_peak=False) # save as dictionary
+    args = args_init(vars(get_args()), align=True) # save as dictionary
 
-    # specific arguments
-    args['align_to_rRNA'] = True # force mapping to rRNA
-    if args['not_merge_rep']:
-        args['merge_rep'] = False # for replicates
+    
+    # args['align_to_te'] = True
 
-    tmp1 = Alignment(**args).run()
-    tmp2 = Alignment_reporter(input=args['path_out'], output=args['path_out']).run()
+    ## run alignment
+    map_bam_list = Alignment(**args).run()
+
+    # # specific arguments
+    # args['align_to_rRNA'] = True # force mapping to rRNA
+    # if args['not_merge_rep']:
+    #     args['merge_rep'] = False # for replicates
+
+    # tmp1 = Alignment(**args).run()
+    # tmp2 = Alignment_reporter(input=args['path_out'], output=args['path_out']).run()
 
 
 if __name__ == '__main__':
