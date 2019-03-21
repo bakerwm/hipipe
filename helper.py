@@ -131,7 +131,7 @@ def args_logger(d, x, overwrite=False):
         key: value
     """
     assert isinstance(d, dict)
-    n = ['%20s : %-40s' % (k, d[k]) for k in list(d.keys())]
+    n = ['%20s : %-40s' % (k, d[k]) for k in sorted(list(d.keys()))]
     if os.path.exists(x) and overwrite is False:
         return True
     else:
@@ -543,6 +543,9 @@ def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False):
                'hg38': 2913022398,}
     gsize = effsize[genome]
 
+    # create bam index
+    BAM(bam).index()
+
     # prefix = os.path.basename(os.path.splitext(bam)[0])
     prefix = file_prefix(bam)[0]
     bw_log = os.path.join(path_out, prefix + '.deeptools.log')
@@ -556,7 +559,7 @@ def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False):
         
         # file existence
         if os.path.exists(bw_fwd) and os.path.exists(bw_rev) and overwrite is False:
-            logging.info('bigWig file exists, skipped: %s' % prefix)
+            logging.info('file exists : %s' % prefix)
         else:
             # attention; bamCoverage using dUTP-based library
             # reverse, forward
@@ -829,7 +832,7 @@ class Genome(object):
         return g
 
 
-    def te(self, format='gtf'):
+    def te_gtf(self, format='gtf'):
         """Return TE annotation of the genome
         or return TE consensus sequence for the genome (dm3)
         """
