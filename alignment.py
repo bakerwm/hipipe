@@ -50,6 +50,7 @@ class AlignIndex(object):
 
         ## fetch the index_name
         if isinstance(index, str):
+            index = index.rstrip('/') # remove '/' at the end
             tag = self.index_validator(index, aligner)
         elif index is None:
             if isinstance(genome, str):
@@ -86,6 +87,7 @@ class AlignIndex(object):
         index_base = os.path.basename(args['index'])
 
         if index_base == 'STAR_index':
+            # args['index'] = args['index'].rstrip('/') # remove '/' in the end
             prefix = os.path.basename(os.path.dirname(args['index']))
         elif index_base == 'genome':
             prefix = os.path.basename(os.path.dirname(os.path.dirname(args['index'])))
@@ -374,7 +376,7 @@ class AlignNode(object):
         n_map = args['n_map']
         if n_map < 1:
             n_map = 1 # default
-        if unique_map:
+        if args['unique_only']:
             para_unique = '-m 1'
         else:
             para_unique = '-v 2 -k %s' % n_map # default: 1
@@ -427,7 +429,7 @@ class AlignNode(object):
         fq_prefix, map_bam, map_log, unmap_fq = self.align_init()
 
         # determine parameters
-        if unique_map:
+        if args['unique_only']:
             para_unique = '-q 10'
         else:
             para_unique = '-q 0'
@@ -442,7 +444,7 @@ class AlignNode(object):
             para_fq = '-k %s' % n_map
 
         # fq type
-        if seq_type(fq) == 'fasta':
+        if seq_type(args['fq1']) == 'fasta':
             para_fq = para_fq + ' -f'
         else:
             para_fq = para_fq + ' -q'
@@ -452,7 +454,7 @@ class AlignNode(object):
             logging.info('bam file exists: %s' % map_bam)
         else:
             c1 = '%s %s -p %s --very-sensitive-local --mm --no-unal --un %s -x %s -U %s' % (bowtie2_exe, 
-                para_fq, args['threads'], unmap_fq, index, args['fq1'])
+                para_fq, args['threads'], unmap_fq, args['index'], args['fq1'])
             c2 = 'samtools view -bhS -F 0x4 -@ %s %s -' % (args['threads'], para_unique)
             c3 = 'samtools sort -@ %s -o %s -' % (args['threads'], map_bam)
             with open(map_log, 'wt') as ff:
@@ -477,6 +479,12 @@ class AlignNode(object):
         args: align_path, None or str
         
         use '--outFilterMultimapNmax' to control uniquely mapped reads
+
+        # update 2019-03-21
+        since 99% of the reads do not map to Blumeria, STAR takes a lot of time trying to squeeze the reads into the wrong genome. The best solution is to make a combined genome of Barley and Blumeria, which will alloy mapping simultaneously to the two genomes, with the best alignments winning.
+        Another option (if you insist on mapping to Blumeria alone) is to reduce --seedPerWindowNmax to 20 or even smaller values. More discussion on it here: https://groups.google.com/d/msg/rna-star/hJL_DUtliCY/HtpiePlMBtYJ .
+        see: https://github.com/alexdobin/STAR/issues/329#issuecomment-334879474
+
         """
         args = self.args.copy()
         star_exe = which('STAR')
@@ -490,7 +498,12 @@ class AlignNode(object):
             n_map = n_map # n_map default: 0
         else:
             n_map = 10 # STAR default: 10
-        para_unique = '--outFilterMultimapNmax %s' % n_map
+        # small genome
+        seed_max = 50 # STAR default: 50
+        if args['small_genome']:
+            seed_max = 20 # even smaller
+
+        para_unique = '--outFilterMultimapNmax %s --seedPerWindowNmax %s' % (n_map, seed_max)
 
         file_reader = 'zcat' if is_gz(args['fq1']) else '-'
 
@@ -566,18 +579,29 @@ class AlignNode(object):
         """Map multiple fastq files to one index
         output directory
         """
+        args = self.args.copy()
+        index_name = AlignIndex(**args).get_index_name()
+        logging.info('index: %s' % args['index']) # !!!! logging
+        logging.info('index_name: %s' % index_name) # !!!! logging
+
         aligner_exe = self.aligner_exe
         map_bam, unmap_file = aligner_exe()
+
+        # sort bam
+
+        # index bam
+        BAM(map_bam).index()
+
         return [map_bam, unmap_file]
 
 
 class AlignHub(object):
     """Alignment 1 fastq file to multiple indexes
-    multiple fastq
-    multiple index (sequential)
+    1 fastq
+    N index (sequential)
     """
     def __init__(self, fq1, path_out, aligner, index_list,
-        smp_name=None, align_by_order=True, **kwargs):
+        smp_name=None, align_by_order=True, dry_run=False, **kwargs):
         """Mulitple indexes"""
         assert isinstance(index_list, list)
         args = args_init(kwargs, align=True)
@@ -590,6 +614,7 @@ class AlignHub(object):
 
         self.index_list = index_list
         self.align_by_order = align_by_order
+        self.dry_run = dry_run
         self.args = args
 
         
@@ -606,9 +631,16 @@ class AlignHub(object):
             if x is None:
                 continue
             args['index'] = x
-            x_bam, x_unmap = AlignNode(**args).run()
-            if self.align_by_order:
-                args['fq1'] = x_unmap
+            x_bam = AlignNode(**args).get_bam()
+            x_unmap = AlignNode(**args).get_unmap()
+
+            if self.dry_run: # do not run alignment
+                pass
+            else:
+                if not os.path.exists(x_bam) or not os.path.exists(x_unmap) or args['overwrite']:
+                    x_bam, x_unmap = AlignNode(**args).run()
+                if self.align_by_order:
+                    args['fq1'] = x_unmap
             map_files.append(x_bam)
 
         return map_files
@@ -617,6 +649,193 @@ class AlignHub(object):
     def run(self):
         """run alignment"""
         map_files = self.align_se_batch()
+
+        return map_files
+
+
+class AlignReader(object):
+    """Return the diretory, files of alignment
+    BAM
+    count
+
+    Example, structure of directory output
+    .
+    ├── extra
+    │   ├── bigWig
+    │   ├── count
+    │   ├── mapping
+    │   └── report
+    ├── gene
+    │   ├── bigWig
+    │   ├── count
+    │   ├── mapping
+    │   └── report
+    └── transposon
+        ├── bigWig
+        ├── count
+        ├── mapping
+        └── report
+
+    
+    Example. structure of gene/mapping
+    .
+    ├── demo_control_rep1
+    │   ├── demo_control_rep1.map_dm6
+    │   ├── demo_control_rep1.map_MT_trRNA
+    │   ├── demo_control_rep1.not_MT_trRNA.map_dm3
+    │   ├── demo_control_rep1.not_MT_trRNA.not_dm3.map_MT_trRNA
+    │   └── demo_control_rep1.not_MT_trRNA.not_dm3.not_MT_trRNA.map_hg19
+    └── demo_control_rep2
+        ├── demo_control_rep2.map_dm6
+        ├── demo_control_rep2.map_MT_trRNA
+        ├── demo_control_rep2.not_MT_trRNA.map_dm3
+        ├── demo_control_rep2.not_MT_trRNA.not_dm3.map_MT_trRNA
+        └── demo_control_rep2.not_MT_trRNA.not_dm3.not_MT_trRNA.map_hg19
+
+    Example. structure 
+
+    *.bam
+    *.json
+    *.log
+
+    """
+
+    def __init__(self, x):
+        """The path of mapping directory
+        mapping/rep1/rep1.map_dm3/rep1.map_dm3.bam
+        *.json
+        *.log
+        """
+        assert os.path.isdir(x)
+
+        ## level1
+        subdir1 = self.listdir(x) # level 1
+        smp_name = self.listdir(x, full_path=False)
+
+        ## level2
+        subdir2 = [self.listdir(i, sort_by_len=True) for i in subdir1] # level 2
+        map_name = [self.listdir(i, full_path=False, sort_by_len=True) for i in subdir1]
+
+        self.subdir1 = subdir1
+        self.subdir2 = subdir2
+        self.smp_name = smp_name
+        self.map_name = map_name
+
+        ## check the directory
+        assert self.check_dir()
+
+        self.root = x
+
+
+    def check_dir(self):
+        """Check the directory 
+        The number of BAM and log files in the directory
+        """
+        bam_files = self.get_bam()
+
+        # number of samples
+        smp_num = len(bam_files)
+
+        # number of indexes for each sample
+        index_num = [len(i) for i in bam_files]
+        index_unique = list(set(index_num))
+
+        # check index number for each sample
+        if len(index_unique) == 1:
+            return True
+        else:
+            index_num = [str(i) for i in index_num]
+            logging.error('failed, BAM files for each sample: ' + ' '.join(index_num))
+            return False
+
+
+    def listdir(self, x, full_path=True, sort_by_len=False):
+        """Return the name of files, dirs in x
+        return the full name
+        """
+        if full_path:
+            p = [os.path.join(x, i) for i in os.listdir(x)]
+        else:
+            p = os.listdir(x)
+
+        if sort_by_len:
+            p = sorted(p, key=len)
+        else:
+            p = sorted(p)
+
+        return p
+
+
+    def index_id(self, fn):
+        """Extract the name of index from filename
+        *.map_{index}
+        """
+        x = os.path.splitext(fn)[1]
+        tag = None
+        if x.startswith(r'.map_'):
+            tag = re.sub(r'.map_', '', x)
+
+        return tag
+
+
+    def get_sample_name(self):
+        """Sample names in level-1 of root
+        return the names
+        """
+        return self.smp_name
+
+
+    def get_index_name(self):
+        """Name of the alignment dir
+        map_{index}
+        """
+        # index_name
+        index_name = [[self.index_id(k) for k in i] for i in self.subdir2]
+
+        # check 
+        x = index_name[0] #
+        if all([i == x for i in index_name]):
+            tag = x
+        else:
+            tag = None
+            logging.error('index number not consistent between samples')
+
+        # return 
+        return tag
+
+
+    def get_bam(self):
+        """Return BAM files
+        self.map/*.bam
+        """
+        bam_files = []
+        for i in self.subdir2:
+            i_bam = []
+            for k in i:
+                k_name = os.path.basename(k)
+                bam = os.path.join(k, k_name + '.bam')
+                if os.path.exists(bam):
+                    i_bam.append(bam)
+            bam_files.append(i_bam)
+
+        return bam_files
+
+
+    def get_log(self):
+        """Return the log files
+        *.log
+        """
+        log_files = []
+        for i in self.subdir2:
+            i_log = []
+            for k in i:
+                k_name = os.path.basename(k)
+                log = os.path.join(k, k_name + '.log')
+                if os.path.exists(log):
+                    i_log.append(log)
+            log_files.append(i_log)
+
+        return log_files
 
 
 class Alignment(object):
@@ -656,11 +875,22 @@ class Alignment(object):
     def run(self):
         args = self.args.copy()
 
+        ## check arguments
+        assert is_path(self.path_out)
+        args_file = os.path.join(self.path_out, 'arguments.txt')
+        args_pickle = os.path.join(self.path_out, 'arguments.pickle')
+        if args_checker(args, args_pickle) and args['overwrite'] is False:
+            logging.info('arguments not changed, alignment skipped')
+            args['dry_run'] = True
+        else:
+            args_logger(args, args_file, overwrite=True) # update arguments.txt
+
         map_files = []
         for fq_in in self.fq1:
             fq_prefix = file_prefix(fq_in)[0]
             fq_prefix = re.sub('\.clean|\.nodup|\.cut', '', fq_prefix)
             fq_path_out = os.path.join(self.path_out, fq_prefix)
+            logging.info('fq_file: %s' % fq_prefix) # !!!! logging
             ## update arguments
             args['fq1'] = fq_in
             args['path_out'] = fq_path_out
