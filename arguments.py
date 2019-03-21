@@ -65,7 +65,7 @@ def args_init(args=None, demx=False, trim=False, align=False, call_peak=False):
         if align:
             args['genome'] = args.get('genome', None)
             args['spikein'] = args.get('spikein', None)
-            args['index_ext'] = args.get('index_ext', None)
+            #args['index_ext'] = args.get('index_ext', None)
             args['extra_index'] = args.get('extra_index', None)
             args['unique_only'] = args.get('unique_only', True) # unique map
             args['aligner'] = args.get('aligner', 'bowtie') # bowtie alignment
