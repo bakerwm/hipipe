@@ -91,15 +91,15 @@ de_analysis (A vs B)
 
 import os
 import sys
-import pathlib
+# import pathlib
 import argparse
 import collections
 import shlex
 import subprocess
-import pysam
+# import pysam
 from arguments import args_init
 from helper import *
-from alignment import AlignIndex, Alignment, Alignment_log, Alignment_stat
+from alignment import Alignment, Alignment_log, Alignment_stat
 from hipipe_reporter import QC_reporter, Alignment_reporter
 
 
@@ -118,6 +118,10 @@ def get_args():
     parser.add_argument('-k', '--spikein', default=None, 
         choices=[None, 'dm3', 'hg19', 'hg38', 'mm10'],
         help='Spike-in genome : dm3, hg19, hg38, mm10, default: None')
+    parser.add_argument('--align-to-te', action='store_true',
+        dest='align_to_te', help='if spcified, align reads to TE')
+    parser.add_argument('--te-index', default=None, dest='te_index',
+        help='path to the align index for TE, default: None')
     parser.add_argument('-x', '--extra-index', nargs='+', dest='extra_index',
         help='Provide extra alignment index(es) for alignment, support multiple\
         indexes. eg. Transposon, tRNA, rRNA and so on.')
@@ -277,6 +281,40 @@ def run_featureCounts(gtf, bam_files, out, strandness=0,
     return out
 
 
+# def counting_gene(bam, gtf, path_out, threads=4, overwrite=True):
+#     """Count gene using featureCount"""
+#     # ## count
+#     # count_path = mapping_gene_path['count']
+#     # count_file = os.path.join(count_path, 'count.txt')
+
+#     # ## count BAM 
+#     # ## only for replicates
+#     # rep_bam = [f for f in map_bam if '_rep' in f.lower()]
+#     # run_featureCounts(
+#     #     gtf=args['gtf'], 
+#     #     bam_files=rep_bam, 
+#     #     out=count_file, 
+#     #     strandness=args['s'], 
+#     #     threads=args['threads'], 
+#     #     overwrite=args['overwrite'])
+
+#     # check BAM index
+
+#     # output file
+#     count_file = os.path.join(path_out, 'count.txt')
+
+#     # run featureCounts
+#     run_featureCounts(
+#         gtf=gtf, 
+#         bam_files=bam, 
+#         out=count_file, 
+#         threads=threads, 
+#         overwrite=overwrite)
+
+#     # return
+#     return count_file
+
+
 def mapping_gene(fq_files, smp_name, args):
     """Mapping reads to genome
     control or treatment
@@ -301,22 +339,24 @@ def mapping_gene(fq_files, smp_name, args):
     args['align_to_te'] = False
 
     ## run alignment
-    map_bam = Alignment(**args).run()
+    map_bam_list = Alignment(**args).run()
+
+    ## filt map_genome
+    map_bam = []
+    for i in map_bam_list:
+        for k in i:
+            if k.endswith('map_' + args['genome'] + '.bam'):
+                map_bam.append(k)
 
     ## mrege replicates
+    # print(map_bam)
 
-    # ## mapping-report
-    # map_report_path = os.path.join(mapping_gene_path['report'], 'mapping')
-    # map_path_list = [mapping_gene_path['mapping'], ]
-    # Alignment_reporter(map_path_list, map_report_path).run()
-    
     # ## create bigWig files
-    # map_bw_path = mapping_gene_path['bigWig']
-    # for bam in map_bam_files:
+    # for bam in map_bam:
     #     bam2bigwig(
     #         bam=bam, 
     #         genome=args['genome'], 
-    #         path_out=map_bw_path, 
+    #         path_out=mapping_gene_path['bigWig'],
     #         strandness=args['s'], 
     #         binsize=args['bin_size'],
     #         overwrite=args['overwrite'])
@@ -324,15 +364,19 @@ def mapping_gene(fq_files, smp_name, args):
     # ## count
     # count_path = mapping_gene_path['count']
     # count_file = os.path.join(count_path, 'count.txt')
-    # ## only kepp replicates
-    # map_bam_files = [f for f in map_bam_files if '_rep' in f]
+
+    # ## count BAM 
+    # ## only for replicates
+    # rep_bam = [f for f in map_bam if '_rep' in f.lower()]
     # run_featureCounts(
     #     gtf=args['gtf'], 
-    #     bam_files=map_bam_files, 
+    #     bam_files=rep_bam, 
     #     out=count_file, 
     #     strandness=args['s'], 
     #     threads=args['threads'], 
     #     overwrite=args['overwrite'])
+
+    return map_bam
 
 
 def mapping_te(fq_files, smp_name, args):
@@ -348,6 +392,8 @@ def mapping_te(fq_files, smp_name, args):
     project_path = init_rnaseq_project(args['path_out'], analysis_type=1)
     mapping_te_path = project_path['transposon']
 
+    args['extra_index'] = None # pre-build
+
     ## qc-report
     qc_path = os.path.join(mapping_te_path['report'], 'qc')
     # QC_reporter(fq_files, qc_path).run()
@@ -359,9 +405,32 @@ def mapping_te(fq_files, smp_name, args):
     args['align_to_te'] = True
 
     ## run alignment
-    map_bam = Alignment(**args).run()
+    map_bam_list = Alignment(**args).run()
+    map_bam = [item for sublist in map_bam_list for item in sublist]
 
-    ## return
+    # create bigWig files
+    for bam in map_bam:
+        bam2bigwig(
+            bam=bam, 
+            genome=args['genome'], 
+            path_out=mapping_te_path['bigWig'],
+            strandness=args['s'], 
+            binsize=args['bin_size'],
+            overwrite=args['overwrite'])
+
+    ## count
+    count_path = mapping_te_path['count']
+    count_file = os.path.join(count_path, 'count.txt')
+    ## only for replicates
+    rep_bam = [f for f in map_bam if '_rep' in f.lower()]
+    run_featureCounts(
+        gtf=args['gtf'], 
+        bam_files=rep_bam, 
+        out=count_file, 
+        strandness=args['s'], 
+        threads=args['threads'], 
+        overwrite=args['overwrite'])
+
     return map_bam
 
 
@@ -393,6 +462,20 @@ def mapping_extra(fq_files, smp_name, args):
 
     ## return
     return map_bam
+
+
+def running_de(bam_ctl, bam_tre, path_out, genome, gtf=None):
+    """Run Differentially expression analysis for control and treatment
+    require replicates
+    + DESeq2
+    + (edgeR)
+    """
+    # R runftion to calculate gene counts
+    
+
+
+
+
 
 
 def run_deseq2(control, treatment, path_out, genome, group='gene'):
@@ -487,24 +570,17 @@ def main():
     ############################################################################
     ## control, args['c']
     ctl_args = args.copy()
-
-    ## extra, te 
     ctl_args['align_to_te'] = False
     ctl_args['extra_index'] = None
-
-    # update arguments
     ctl_args['path_out'] = os.path.join(args['path_out'], args['C'])
     mapping_gene(args['c'], args['C'], ctl_args)
 
-    # ## treatment, args['t']
-    # tre_args = args.copy()
-    # tre_fqs = tre_args['t']
-    # tre_prefix = str_common([os.path.basename(f) for f in tre_fqs])
-    # tre_prefix = tre_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
-    # if args['T'] is None:
-    #     args['T'] = tre_prefix
-    # ## path to treatment
-    # tre_args['path_out'] = os.path.join(args['path_out'], args['T'])
+    ## treatment, args['t']
+    tre_args = args.copy()
+    tre_args['align_to_te'] = False
+    tre_args['extra_index'] = None
+    tre_args['path_out'] = os.path.join(args['path_out'], args['T'])
+    mapping_gene(args['t'], args['T'], tre_args)
 
     # ## de_analysis
     # ## gene, transposon, extra_genes
@@ -526,12 +602,17 @@ def main():
     ############################################################################
     ## te analysis
     ############################################################################
+    args['gtf'] = Genome(args['genome']).te_gtf()
+    
     ## control, args['c']
     ctl_args = args.copy()
-
-    ## path to control
-    ctl_args['path_out'] = os.path.join(args['path_out'], args['C'])
+    ctl_args['path_out'] = os.path.join(args['path_out'], args['C'])    
     # mapping_te(args['c'], args['C'], ctl_args)
+
+    ## treatment, args['t']
+    tre_args = args.copy()
+    tre_args['path_out'] = os.path.join(args['path_out'], args['T'])
+    # mapping_te(args['t'], args['T'], tre_args)
 
 
     ############################################################################
@@ -539,8 +620,6 @@ def main():
     ############################################################################
     ## control, args['c']
     ctl_args = args.copy()
-
-    ## path to control
     ctl_args['path_out'] = os.path.join(args['path_out'], args['C'])
     # mapping_extra(args['c'], args['C'], ctl_args)
 
