@@ -71,7 +71,7 @@ def args_logger(d, x, overwrite=False):
         key: value
     """
     assert isinstance(d, dict)
-    n = ['%20s : %-40s' % (k, d[k]) for k in list(d.keys())]
+    n = ['%20s : %-40s' % (k, d[k]) for k in sorted(list(d.keys()))]
     if os.path.exists(x) and overwrite is False:
         return True
     else:
