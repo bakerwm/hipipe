@@ -410,11 +410,15 @@ class Demx(object):
         ####################
         ## prepare reader ##
         ####################
+        flag = 1
         fq_reader1 = gzip.open if is_gz(fq1) else open
         fq_reader2 = gzip.open if is_gz(fq2) else open
         with fq_reader1(fq1, 'rt') as f1, fq_reader2(fq2, 'rt') as f2:
             while True:
                 try:
+                    # print progress
+                    if flag % 1000000 == 0:
+                        logging.info('%d reads processed' % flag)
                     s1 = [next(f1), next(f1), next(f1), next(f1)]
                     s2 = [next(f2), next(f2), next(f2), next(f2)]
                     s1 = [i.strip() for i in s1]
@@ -430,6 +434,7 @@ class Demx(object):
                     p7_writer[tag][0].write('\n'.join(s1_new) + '\n')
                     p7_writer[tag][1].write('\n'.join(s2) + '\n') # not processed
                     p7_count[tag]['count'] += 1
+                    flag = flag + 1
                 except StopIteration:
                     break
         # close writers
@@ -487,10 +492,14 @@ class Demx(object):
         ####################
         ## prepare reader ##
         ####################
+        flag = 1
         fq_reader = gzip.open if is_gz(fq1) else open
         with fq_reader(fq1, 'rt') as f1:
             while True:
                 try:
+                    # print progress
+                    if flag % 1000000 == 0:
+                        logging.info('%d reads processed' % flag)
                     s1 = [next(f1), next(f1), next(f1), next(f1)]
                     s1 = [i.strip() for i in s1]
                     # extract P7 sequence
@@ -498,6 +507,7 @@ class Demx(object):
                     tag = self.str_validator(p7_query, p7_dict, mm=mm)
                     p7_writer[tag].write('\n'.join(s1_new) + '\n')
                     p7_count[tag]['count'] += 1
+                    flag = flag + 1
                 except StopIteration:
                     break
         # close writers
@@ -575,11 +585,15 @@ class Demx(object):
         ####################
         ## prepare reader ##
         ####################
+        flag = 1
         fq_reader1 = gzip.open if is_gz(fq1) else open
         fq_reader2 = gzip.open if is_gz(fq2) else open
         with fq_reader1(fq1, 'rt') as f1, fq_reader2(fq2, 'rt') as f2:
             while True:
                 try:
+                    # print progress
+                    if flag % 1000000 == 0:
+                        logging.info('%d reads processed' % flag)
                     s1 = [next(f1), next(f1), next(f1), next(f1)]
                     s2 = [next(f2), next(f2), next(f2), next(f2)]
                     s1 = [i.strip() for i in s1]
@@ -596,6 +610,7 @@ class Demx(object):
                     bc_writer[tag][0].write('\n'.join(s1_new) + '\n')
                     bc_writer[tag][1].write('\n'.join(s2) + '\n')
                     bc_count[tag]['count'] += 1
+                    flag = flag + 1
                 except StopIteration:
                     break
         # close writers
