@@ -53,9 +53,9 @@ class OSS(object):
         """Download files/directory from OSS
         
         Data_text:
-        AccessKeyId: LTAISMrCJ5zDsDVx
-        AccessKeySecret: PiSswEuXgRSBQebBcQh3YwtW9aY9Nc
-        预设OSS路径: oss://pangoo-bj/customer-c6k9xwmI/
+        AccessKeyId: **********
+        AccessKeySecret: **********
+        预设OSS路径: oss://pangoo-bj/customer-*********/
         区域: 华北2(北京) oss-cn-beijing.aliyuncs.com
 
         arguments:
