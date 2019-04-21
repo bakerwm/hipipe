@@ -210,7 +210,7 @@ class Trimmer(object):
                     args['trim_times'])
 
         ## adapter3
-        ad3_list = [args['adapter3'], ]
+        ad3_list = args['adapter3'] #[args['adapter3'], ]
         ## add short version of adapter3
         if args['adapter_sliding']:
             ad3_list = self.adapter_chopper(args['adapter3'])
