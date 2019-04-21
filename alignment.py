@@ -12,6 +12,7 @@ import re
 import json
 import fnmatch
 import tempfile
+import pickle
 import shutil
 import shlex
 import subprocess
@@ -23,6 +24,76 @@ from functools import partial
 from utils_parser import Json_file
 from arguments import args_init
 from helper import *
+
+
+class Alignment(object):
+    """Run alignment
+    :args fq1
+    :args path_out
+    :args aligner
+    :args smp_name
+    :args genome
+    :args spikein
+    :args align_to_te
+    :args te_index
+    :args extra_index
+    :args repeat_masked_genome
+    :args genome_path
+    """
+    def __init__(self, fq1, path_out, aligner, smp_name=None, 
+        genome=None, align_by_order=True, **kwargs):
+        """Mulitple index"""
+        args = args_init(kwargs, align=True)
+
+        ## update arguments
+        args['fq1'] = fq1
+        # args['path_out'] = path_out
+        args['aligner'] = aligner
+        args['smp_name'] = smp_name
+        args['genome'] = genome
+        args['align_by_order'] = align_by_order
+
+        ## create index
+        args['index_list'] = AlignIndexBuilder(**args).get_index()
+        self.fq1 = fq1
+        self.path_out = path_out # original path_out
+        self.args = args
+
+
+    def run(self):
+        args = self.args.copy()
+
+        ## check arguments
+        assert is_path(self.path_out)
+        args_file = os.path.join(self.path_out, 'arguments.txt')
+        args_pickle = os.path.join(self.path_out, 'arguments.pickle')
+        if args_checker(args, args_pickle) and args['overwrite'] is False:
+            logging.info('arguments not changed, alignment skipped')
+            args['dry_run'] = True
+        else:
+            args_logger(args, args_file, overwrite=True) # update arguments.txt
+
+        map_files = []
+        for fq_in in self.fq1:
+            fq_prefix = file_prefix(fq_in)[0]
+            fq_prefix = re.sub('\.clean|\.nodup|\.cut', '', fq_prefix)
+            if args['simple_name']:
+                fq_prefix = re.sub('.not_\w+', '', fq_prefix)
+                fq_prefix = re.sub('.map_\w+', '', fq_prefix)
+
+            fq_path_out = os.path.join(self.path_out, fq_prefix)
+            logging.info('fq_file: %s' % fq_prefix) # !!!! logging
+            ## update arguments
+            args['fq1'] = fq_in
+            args['path_out'] = fq_path_out
+            bam_files = AlignHub(**args).run()
+            map_files.append(bam_files)
+            ## summarize alignment log
+            align_stat = AlignSummarize(path_out=fq_path_out).run()
+            # print(fq_path_out)
+            # print(align_stat)
+
+        return map_files
 
 
 class AlignIndex(object):
@@ -335,12 +406,19 @@ class AlignNode(object):
             fq_prefix = args['smp_name']
         fq_type = seq_type(args['fq1'])
 
+        ## simplify sample name
+        if args['simple_name']:
+            if '.not_' in fq_prefix:
+                fq_prefix = re.sub('.not_\w+', '', fq_prefix)
+                fq_prefix = re.sub('.map_\w+', '', fq_prefix)
+
         ## sub directory
         index_name = AlignIndex(**args).get_index_name()
         align_path = os.path.join(args['path_out'], fq_prefix + '.map_' + index_name)
         assert is_path(align_path)
 
         ## output files
+        # print(fq_prefix)
         map_prefix = os.path.join(align_path, fq_prefix + '.map_' + index_name) #
         unmap_prefix = os.path.join(align_path, fq_prefix + '.not_' + index_name) #
         map_bam = map_prefix + '.bam'
@@ -381,7 +459,7 @@ class AlignNode(object):
         else:
             para_unique = '-v 2 -k %s' % n_map # default: 1
 
-        if seq_type(fq) == 'fasta':
+        if seq_type(args['fq1']) == 'fasta':
             para_fq = '-f'
         else:
             para_fq = '-q'
@@ -392,7 +470,7 @@ class AlignNode(object):
         else:
             c1 = '%s %s %s -p %s --mm --best --sam --no-unal --un %s %s \
                 %s' % (bowtie_exe, para_fq, para_unique, args['threads'], 
-                    unmap_fq, index, args['fq1'])
+                    unmap_fq, args['index'], args['fq1'])
             c2 = 'samtools view -bhS -F 0x4 -@ %s -' % args['threads']
             c3 = 'samtools sort -@ %s -o %s -' % (args['threads'], map_bam)
             with open(map_log, 'wt') as ff:
@@ -631,6 +709,11 @@ class AlignHub(object):
             if x is None:
                 continue
             args['index'] = x
+
+            # index order
+            x_order = self.index_list.index(x) + 1
+
+            # check exists
             x_bam = AlignNode(**args).get_bam()
             x_unmap = AlignNode(**args).get_unmap()
 
@@ -639,8 +722,12 @@ class AlignHub(object):
             else:
                 if not os.path.exists(x_bam) or not os.path.exists(x_unmap) or args['overwrite']:
                     x_bam, x_unmap = AlignNode(**args).run()
-                if self.align_by_order:
-                    args['fq1'] = x_unmap
+
+            ## update arguments
+            if self.align_by_order:
+                args['fq1'] = x_unmap
+
+            ## save bam files
             map_files.append(x_bam)
 
         return map_files
@@ -661,15 +748,15 @@ class AlignReader(object):
     Example, structure of directory output
     .
     ├── extra
-    │   ├── bigWig
-    │   ├── count
-    │   ├── mapping
-    │   └── report
-    ├── gene
-    │   ├── bigWig
-    │   ├── count
-    │   ├── mapping
-    │   └── report
+    │   ├── bigWig
+    │   ├── count
+    │   ├── mapping
+    │   └── report
+    ├─ gene
+    │   ├── bigWig
+    │   ├── count
+    │   ├── mapping
+    │   └── report
     └── transposon
         ├── bigWig
         ├── count
@@ -680,11 +767,11 @@ class AlignReader(object):
     Example. structure of gene/mapping
     .
     ├── demo_control_rep1
-    │   ├── demo_control_rep1.map_dm6
-    │   ├── demo_control_rep1.map_MT_trRNA
-    │   ├── demo_control_rep1.not_MT_trRNA.map_dm3
-    │   ├── demo_control_rep1.not_MT_trRNA.not_dm3.map_MT_trRNA
-    │   └── demo_control_rep1.not_MT_trRNA.not_dm3.not_MT_trRNA.map_hg19
+    │   ├── demo_control_rep1.map_dm6
+    │   ├── demo_control_rep1.map_MT_trRNA
+    │   ├── demo_control_rep1.not_MT_trRNA.map_dm3
+    │   ├── demo_control_rep1.not_MT_trRNA.not_dm3.map_MT_trRNA
+    │   └── demo_control_rep1.not_MT_trRNA.not_dm3.not_MT_trRNA.map_hg19
     └── demo_control_rep2
         ├── demo_control_rep2.map_dm6
         ├── demo_control_rep2.map_MT_trRNA
@@ -838,67 +925,224 @@ class AlignReader(object):
         return log_files
 
 
-class Alignment(object):
-    """Run alignment
-    :args fq1
-    :args path_out
-    :args aligner
-    :args smp_name
-    :args genome
-    :args spikein
-    :args align_to_te
-    :args te_index
-    :args extra_index
-    :args repeat_masked_genome
-    :args genome_path
+class AlignSummarize(object):
+    """Summarize the alignment 
+    Number of reads mapped, unmapped, ...
+    multiple index
+
+    format-1:
+    genome+spikein:
+    rRNA1,genome,rRNA2,spikein
+
+    format-2:
+    extra,te,...
+    list_in_paralle
     """
-    def __init__(self, fq1, path_out, aligner, smp_name=None, 
-        genome=None, align_by_order=True, **kwargs):
-        """Mulitple index"""
-        args = args_init(kwargs, align=True)
 
-        ## update arguments
-        args['fq1'] = fq1
-        # args['path_out'] = path_out
-        args['aligner'] = aligner
-        args['smp_name'] = smp_name
-        args['genome'] = genome
-        args['align_by_order'] = align_by_order
+    def __init__(self, path_out, **kwargs):
+        """The directory of alignemnt"""
+        self.path_out = path_out
+        self.sub_dirs = self.list_dir()
 
-        ## create index
-        args['index_list'] = AlignIndexBuilder(**args).get_index()
-        self.fq1 = fq1
-        self.path_out = path_out # original path_out
-        self.args = args
+
+    def list_dir(self):
+        """List the sub-folders, indexes,"""
+        sub_dirs = [os.path.join(self.path_out, i) for i in os.listdir(self.path_out)]
+        # sub_dirs = [os.path.join(self.path_out, i) for i in sub_dirs if os.path.isdir(i)] # directory
+        sub_dirs = [i for i in sub_dirs if os.path.isdir(i)]
+        sub_dirs = sorted(sub_dirs, key=len) # sort by length
+        return sub_dirs
+
+
+    def align_type(self):
+        """Check the type of alignment:
+        1. genome + spikein
+        2. te, extra, ...
+        
+        input: ../arguments.pickle
+        """
+        args_pickle = os.path.join(os.path.dirname(self.path_out), 'arguments.pickle')
+        if not os.path.exists(args_pickle):
+            raise Exception('not a alignment directory: %s' % args_pickle)
+        # args = pickle.load(args_pickle) # dict
+        # read arguments
+        with open(args_pickle, 'rb') as fi:
+            args = pickle.load(fi)
+        if args['align_to_te'] or args['extra_index']:
+            flag = 2
+        else:
+            flag = 1
+        return flag
+
+
+    def align_reads(self, x):
+        """total, unique, multiple, map, unmap
+        x, the path to alignment directory, (sub_dir)
+        require *.json file
+        """
+        x_name = os.path.basename(x)
+        json_file = os.path.join(x, x_name + '.json')
+        if not os.path.exists(json_file):
+            raise Exception('json file not found: %s' % json_file)
+        ## load
+        dd = Json_file(json_file).json_reader()
+
+        ## return
+        return dd
+ 
+
+    def index_name(self, x):
+        """Return the name of index, at the tail of dirname
+        .map_dm3
+        .map_rRNA
+        .map_extra
+        ...
+        get the name of index
+        """
+        x_ext = os.path.splitext(x)[1] # 
+        if x_ext.startswith('.map_'):
+            flag = re.sub(r'.map_', '', x_ext)
+        else:
+            flag = None
+            logging.warning('not a alignment directory: %s' % x)
+
+        return flag
+
+
+    def align_sum1(self):
+        """Summarize the alignment log/json file
+        genome + spikein
+        rRNA, genome, rRNA, spikein
+        uniform the format
+        """
+        dirs = self.list_dir()
+        # length: 2, 4
+        if len(dirs) == 1:
+            ## 1st, genome
+            d_name1 = self.index_name(dirs[0])
+            # label
+            # total, rRNA, genome, rRNA, genome, unmap
+            k_labels = ['00_total',]
+            k_label1 = '%02d_%s_rRNA' % (1, d_name1)
+            k_label2 = '%02d_%s' % (2, d_name1)
+            k_label3 = '%02d_%s_rRNA' % (3, d_name1)
+            k_label4 = '%02d_%s' % (4, d_name1)
+            #
+            for k in [k_label1, k_label2, k_label3, k_label4]:
+                k_labels.append(k + '_unique')
+                k_labels.append(k + '_multiple')
+            k_labels.append('05_unmap')
+            # count
+            d_reads1 = self.align_reads(dirs[0])
+            k_reads = [d_reads1['total'], 
+                0, 0, 
+                d_reads1['unique'], d_reads1['multiple'], 
+                0, 0, 
+                0, 0,
+                d_reads1['unmap']]
+        elif len(dirs) == 2:
+            ## 1st, genome
+            ## 2nd, spikein
+            d_name1 = self.index_name(dirs[0])
+            d_name2 = self.index_name(dirs[1])
+            # label
+            # total, rRNA, genome, rRNA, genome, unmap
+            k_labels = ['00_total',]
+            k_label1 = '%02d_%s_rRNA' % (1, d_name1)
+            k_label2 = '%02d_%s' % (2, d_name1)
+            k_label3 = '%02d_%s_rRNA' % (3, d_name2)
+            k_label4 = '%02d_%s' % (4, d_name2)
+            #
+            for k in [k_label1, k_label2, k_label3, k_label4]:
+                k_labels.append(k + '_unique')
+                k_labels.append(k + '_multiple')
+            k_labels.append('05_unmap')
+            # count
+            d_reads1 = self.align_reads(dirs[0])
+            d_reads2 = self.align_reads(dirs[1])
+            k_reads = [d_reads1['total'], 
+                0, 0, 
+                d_reads1['unique'], d_reads1['multiple'], 
+                0, 0, 
+                d_reads2['unique'], d_reads2['multiple'],
+                d_reads2['unmap']]
+        elif len(dirs) == 4:
+            d_name1 = self.index_name(dirs[0])
+            d_name2 = self.index_name(dirs[1])
+            d_name3 = self.index_name(dirs[2])
+            d_name4 = self.index_name(dirs[3])
+            # label
+            k_labels = ['00_total',]
+            k_label1 = '%02d_%s_%s' % (1, d_name2, d_name1)
+            k_label2 = '%02d_%s' % (1, d_name2)
+            k_label3 = '%02d_%s_%s' % (1, d_name4, d_name3)
+            k_label4 = '%02d_%s' % (1, d_name4)
+            # 
+            for k in [k_label1, k_label2, k_label3, k_label4]:
+                k_labels.append(k + '_unique')
+                k_labels.append(k + '_multiple')
+            k_labels.append('05_unmap')
+            # count
+            d_reads1 = self.align_reads(dirs[0])
+            d_reads2 = self.align_reads(dirs[1])
+            d_reads3 = self.align_reads(dirs[2])
+            d_reads4 = self.align_reads(dirs[3])
+            k_reads = [d_reads1['total'],
+                d_reads1['unique'], d_reads1['multiple'],
+                d_reads2['unique'], d_reads2['multiple'],
+                d_reads3['unique'], d_reads3['multiple'],
+                d_reads4['unique'], d_reads4['multiple'],
+                d_reads4['unmap']]
+        else:
+            k_labels = ['null']
+            k_reads = [0]
+
+        # build dict/pandas.DataFrame
+        k_dict = dict(zip(k_labels, k_reads))
+        return k_dict
+
+
+    def align_sum2(self):
+        """extra mapping reads"""
+        dirs = self.list_dir()
+        
+        # labels
+        k_labels = ['00_total']
+        k_reads = []
+
+        for d in dirs:
+            d_index = dirs.index(d)
+            d_name = self.index_name(d)
+            d_reads = self.align_reads(d)
+            d_labels = ['%02d_%s_%s' % (d_index, d_name, i) for i in ['unique', 'multiple']]
+            d_counts = [d_reads['unique'], d_reads['multiple']]
+            if d_index == 0: # 1st
+                k_reads.append(d_reads['total'])
+            k_labels.extend(d_labels)
+            k_reads.extend(d_counts)
+        # last one
+        k_labels.append('unmap')
+        k_reads.append(d_reads['unmap'])
+
+        # build dict
+        k_dict = dict(zip(k_labels, k_reads))
+        return k_dict
 
 
     def run(self):
-        args = self.args.copy()
-
-        ## check arguments
-        assert is_path(self.path_out)
-        args_file = os.path.join(self.path_out, 'arguments.txt')
-        args_pickle = os.path.join(self.path_out, 'arguments.pickle')
-        if args_checker(args, args_pickle) and args['overwrite'] is False:
-            logging.info('arguments not changed, alignment skipped')
-            args['dry_run'] = True
+        flag = self.align_type()
+        if flag == 1: 
+            d = self.align_sum1()
         else:
-            args_logger(args, args_file, overwrite=True) # update arguments.txt
+            d = self.align_sum2()
+        # save dict to file
+        map_stat_file = self.path_out.rstrip('/') + '.mapping_stat.csv'
+        prefix = os.path.basename(self.path_out)
+        df = pd.DataFrame(d, index=[prefix])
+        df.to_csv(map_stat_file, index=True)
 
-        map_files = []
-        for fq_in in self.fq1:
-            fq_prefix = file_prefix(fq_in)[0]
-            fq_prefix = re.sub('\.clean|\.nodup|\.cut', '', fq_prefix)
-            fq_path_out = os.path.join(self.path_out, fq_prefix)
-            logging.info('fq_file: %s' % fq_prefix) # !!!! logging
-            ## update arguments
-            args['fq1'] = fq_in
-            args['path_out'] = fq_path_out
-            bam_files = AlignHub(**args).run()
-            map_files.append(bam_files)
-
-        return map_files
-
+        return d
+ 
 
 class Alignment_log(object):
     """Wrapper log file of aligner, bowtie, bowtie2, STAR
