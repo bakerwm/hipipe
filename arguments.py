@@ -5,7 +5,7 @@ Prepare arguments for goldclip pipeline
 import os
 import pathlib
 
-def args_init(args=None, demx=False, trim=False, align=False, call_peak=False):
+def args_init(args=None, demx=False, trim=False, align=False, call_peak=False, bam2bw=False):
         """Inititate the arguments, assign the default values to arg
         positional arg: smp, genome
         """
@@ -19,6 +19,8 @@ def args_init(args=None, demx=False, trim=False, align=False, call_peak=False):
         args['fq1'] = args.get('fq1', None)
         args['fq2'] = args.get('fq2', None)
         args['path_out'] = args.get('path_out', str(pathlib.Path.cwd()))
+        if args['path_out'] is None:
+            args['path_out'] = str(pathlib.Path.cwd())
 
         ## optional
         genome_path = os.path.join(str(pathlib.Path.home()), 'data', 'genome')
@@ -76,6 +78,8 @@ def args_init(args=None, demx=False, trim=False, align=False, call_peak=False):
             args['align_to_rRNA'] = args.get('align_to_rRNA', True)
             args['repeat_masked_genome'] = args.get('repeat_masked_genome', False)
             args['merge_rep'] = args.get('merge_rep', True)
+            args['small_genome'] = args.get('small_genome', False)
+            args['simple_name'] = args.get('simple_name', False)
 
             # check-point
             if args['spikein'] == args['genome']:
@@ -89,6 +93,15 @@ def args_init(args=None, demx=False, trim=False, align=False, call_peak=False):
             args['threshold'] = args.get('threshold', 1)
             args['intersect'] = args.get('intersect', 0)
             args['threads'] = args.get('threads', 8)
+
+        ## bam2bw
+        if bam2bw:
+            args['filterRNAstrand'] = args.get('filterRNAstrand', None)
+            args['samFlagExclude'] = args.get('samFlagExclude', None)
+            args['samFlagInclude'] = args.get('samFlagInclude', None)
+            args['binsize'] = args.get('binsize', 10)
+            
+
 
         return args
 
