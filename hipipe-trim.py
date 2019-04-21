@@ -51,7 +51,8 @@ def get_args():
                                      description='trimming reads')
     parser.add_argument('-i', '--fq1', nargs='+', required=True, 
         help='reads in FASTQ files, support (*.gz), 1-4 files.')
-    parser.add_argument('-a', '--adapter3',  default='AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC', 
+    parser.add_argument('-a', '--adapter3',  nargs='+',
+        default='AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC', 
         metavar='adapter', type=str,
         help='3-Adapter, \
         TruSeq RNAseq: AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC \
@@ -59,7 +60,7 @@ def get_args():
         Nextera: CTGTCTCTTATACACATCT')
     parser.add_argument('-o', '--path_out', default=None, 
         help='The directory to save results.')
-    parser.add_argument('-g', '--adapter5', default='',
+    parser.add_argument('-g', '--adapter5', nargs='+', default='',
         help='5-Adapter, default: None')
     parser.add_argument('-m', '--len_min', default=15, metavar='len_min', 
         type=int, help='Minimum length of reads after trimming, defualt [15]')
@@ -118,9 +119,11 @@ def get_args():
     ## PE arguments
     parser.add_argument('--fq2', nargs='+', default=None, 
         help='The read2 of pair-end reads')
-    parser.add_argument('-A', '--AD3', default='AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT',
+    parser.add_argument('-A', '--AD3', nargs='+',
+        default='AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT',
         help='The 3 adapter of read2, default: AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT')
-    parser.add_argument('-G', '--AD5', default=None,
+    parser.add_argument('-G', '--AD5', nargs='+',
+        default=None,
         help='The 5 adapter of read1, default: None')
     args = parser.parse_args()
     return args
