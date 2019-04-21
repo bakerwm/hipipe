@@ -78,6 +78,9 @@ def get_args():
         action='store_true',
         help='if align to small genome, over 90 percent of the reads are not aligned,\
         should use this option for STAR alignment, to reduce the alignment time.')
+    parser.add_argument('--simple-name', dest='simple_name', 
+        action='store_true',
+        help='use simple name for fastq prefix, remove .not_..., .map_to..., ')
     args = parser.parse_args()
     return args
 
