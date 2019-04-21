@@ -34,6 +34,10 @@ logging.basicConfig(format = '[%(asctime)s] %(message)s',
                     level = logging.DEBUG)
 
 
+def eprint(*args, **kwargs):
+    """Print to stderr"""
+    print(*args, file=sys.stderr, **kwargs)
+
 
 def gzip_file(x, decompress=False, rm=True):
     """Compress file using gzip module
@@ -104,7 +108,10 @@ def which(program):
 
 
 def args_checker(d, x, update=False):
-    """Check if dict and x are consitent"""
+    """Check if dict and x are consitent
+    d is dict
+    x is pickle file
+    """
     assert isinstance(d, dict)
     flag = None
     if os.path.exists(x):
@@ -123,6 +130,7 @@ def args_checker(d, x, update=False):
             pickle.dump(d, fo, protocol=pickle.HIGHEST_PROTOCOL)
     else:
         logging.error('illegal x= argument: %s' % x)
+
     return flag
 
 
@@ -394,56 +402,6 @@ def venv_checker(venv = '~/envs/py27', into_venv = True):
 
 ################################################################################
 ## config
-def bam2bw(bam, genome, path_out, strandness=True, binsize=1, overwrite=False):
-    """
-    Convert bam to bigWig using deeptools
-    https://deeptools.readthedocs.io/en/develop/content/feature/effectiveGenomeSize.html
-    history:
-    1. Mappable sequence of a genome, see Table 1 in 
-       url: https://www.nature.com/articles/nbt.1518.pdf
-    2. effective genome size:
-        - non-N bases
-        - regions (of some size) uniquely mappable
-    3. UCSC
-    http://genomewiki.ucsc.edu/index.php/Hg19_100way_Genome_size_statistics
-    http://genomewiki.ucsc.edu/index.php/Hg38_7-way_Genome_size_statistics
-    """
-    assert is_path(path_out)
-    effsize = {'dm3': 162367812,
-               'dm6': 142573017,
-               'mm9': 2620345972,
-               'mm10': 2652783500,
-               'hg19': 2451960000,
-               'hg38': 2913022398,}
-    gsize = effsize[genome]
-    # prefix = os.path.basename(os.path.splitext(bam)[0])
-    prefix = file_prefix(bam)[0]
-    bw_log = os.path.join(path_out, prefix + '.deeptools.log')
-    if strandness:
-        bw_fwd = os.path.join(path_out, prefix + '.fwd.bigWig')
-        bw_rev = os.path.join(path_out, prefix + '.rev.bigWig')
-        c1 = 'bamCoverage -b {} -o {} --binSize {} --filterRNAstrand forward \
-              --normalizeTo1x {}'.format(bam, bw_fwd, binsize, gsize)
-        c2 = 'bamCoverage -b {} -o {} --binSize {} --filterRNAstrand reverse \
-              --normalizeTo1x {}'.format(bam, bw_rev, binsize, gsize)
-        if os.path.exists(bw_fwd) and os.path.exists(bw_rev) and not overwrite:
-            logging.info('file exists, bigWig skipped ...')
-        else:
-            with open(bw_log, 'wt') as fo:
-                subprocess.run(shlex.split(c1), stdout=fo, stderr=fo)
-            with open(bw_log, 'wa') as fo:
-                subprocess.run(shlex.split(c2), stdout=fo, stderr=fo)
-    else:
-        bw = os.path.join(path_out, prefix + '.bigWig')
-        c3 = 'bamCoverage -b {} -o {} --binSize {} \
-              --normalizeTo1x {}'.format(bam, bw, binsize, gsize)
-        if os.path.exists(bw) and not overwrite:
-            logging.info('file exists, bigWig skipped ...')
-        else:
-            with open(bw_log, 'wt') as fo:
-                subprocess.run(shlex.split(c3), stdout=fo, stderr=fo)
-
-
 def bam_merge(bam_ins, bam_out):
     """
     merge multiple bam files
@@ -508,7 +466,7 @@ def bam2bigwig2(bam, path_out, scale=1, binsize=1, overwrite=False):
             raise ValueError('failed to create bigWig file, %s' % bw_out)
 
 
-def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False):
+def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False, **kwargs):
     """Convert bam to bigWig using deeptools
     https://deeptools.readthedocs.io/en/develop/content/feature/effectiveGenomeSize.html
     history:
@@ -554,8 +512,9 @@ def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False):
         # strandness
         bw_fwd = os.path.join(path_out, prefix + '.fwd.bigWig')
         bw_rev = os.path.join(path_out, prefix + '.rev.bigWig')
-        if strandness == 2:
-            bw_fwd, bw_rev = [bw_rev, bw_fwd]
+        # print(bw_fwd)
+        # if strandness == 2:
+        #     bw_fwd, bw_rev = [bw_rev, bw_fwd]
         
         # file existence
         if os.path.exists(bw_fwd) and os.path.exists(bw_rev) and overwrite is False:
@@ -590,6 +549,154 @@ def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False):
                     subprocess.run(shlex.split(c3), stdout=fo, stderr=fo)
             if not os.path.exists(bw):
                 raise ValueError('output file is missing, check log file: %s' % bw_log)
+
+
+# def bam2bw(bam, genome, path_out, strandness=True, binsize=1, overwrite=False):
+#     """
+#     Convert bam to bigWig using deeptools
+#     https://deeptools.readthedocs.io/en/develop/content/feature/effectiveGenomeSize.html
+#     history:
+#     1. Mappable sequence of a genome, see Table 1 in 
+#        url: https://www.nature.com/articles/nbt.1518.pdf
+#     2. effective genome size:
+#         - non-N bases
+#         - regions (of some size) uniquely mappable
+#     3. UCSC
+#     http://genomewiki.ucsc.edu/index.php/Hg19_100way_Genome_size_statistics
+#     http://genomewiki.ucsc.edu/index.php/Hg38_7-way_Genome_size_statistics
+#     """
+#     assert is_path(path_out)
+#     effsize = {'dm3': 162367812,
+#                'dm6': 142573017,
+#                'mm9': 2620345972,
+#                'mm10': 2652783500,
+#                'hg19': 2451960000,
+#                'hg38': 2913022398,}
+#     gsize = effsize[genome]
+#     # prefix = os.path.basename(os.path.splitext(bam)[0])
+#     prefix = file_prefix(bam)[0]
+#     bw_log = os.path.join(path_out, prefix + '.deeptools.log')
+#     if strandness:
+#         bw_fwd = os.path.join(path_out, prefix + '.fwd.bigWig')
+#         bw_rev = os.path.join(path_out, prefix + '.rev.bigWig')
+#         c1 = 'bamCoverage -b {} -o {} --binSize {} --filterRNAstrand forward \
+#               --normalizeTo1x {}'.format(bam, bw_fwd, binsize, gsize)
+#         c2 = 'bamCoverage -b {} -o {} --binSize {} --filterRNAstrand reverse \
+#               --normalizeTo1x {}'.format(bam, bw_rev, binsize, gsize)
+#         if os.path.exists(bw_fwd) and os.path.exists(bw_rev) and not overwrite:
+#             logging.info('file exists, bigWig skipped ...')
+#         else:
+#             with open(bw_log, 'wt') as fo:
+#                 subprocess.run(shlex.split(c1), stdout=fo, stderr=fo)
+#             with open(bw_log, 'wa') as fo:
+#                 subprocess.run(shlex.split(c2), stdout=fo, stderr=fo)
+#     else:
+#         bw = os.path.join(path_out, prefix + '.bigWig')
+#         c3 = 'bamCoverage -b {} -o {} --binSize {} \
+#               --normalizeTo1x {}'.format(bam, bw, binsize, gsize)
+#         if os.path.exists(bw) and not overwrite:
+#             logging.info('file exists, bigWig skipped ...')
+#         else:
+#             with open(bw_log, 'wt') as fo:
+#                 subprocess.run(shlex.split(c3), stdout=fo, stderr=fo)
+
+
+def bam2bw(bam, path_out, scale=1, **args):
+    """Convert bam to bigWig using deeptools
+    https://deeptools.readthedocs.io/en/develop/content/feature/effectiveGenomeSize.html
+    history:
+    1. Mappable sequence of a genome, see Table 1 in 
+       url: https://www.nature.com/articles/nbt.1518.pdf
+    2. effective genome size:
+        - non-N bases
+        - regions (of some size) uniquely mappable
+    3. UCSC
+    http://genomewiki.ucsc.edu/index.php/Hg19_100way_Genome_size_statistics
+    http://genomewiki.ucsc.edu/index.php/Hg38_7-way_Genome_size_statistics
+
+    !!! strandness
+    default: dUTP-based library (read2 is sense strand, read1 is anti-sense strand)
+    general RNA library: (NSR, small-RNA-library), read1 is sense, read2 is antisense
+
+    --scaleFactor
+    --filterRNAstrand
+    --samFlagExclude
+    --samFlagInclude
+    --genome
+
+
+    """
+    assert os.path.exists(bam)
+    assert is_path(path_out)
+    assert isinstance(scale, float)
+
+    effsize = {'dm3': 162367812,
+               'dm6': 142573017,
+               'mm9': 2620345972,
+               'mm10': 2652783500,
+               'hg19': 2451960000,
+               'hg38': 2913022398,}
+    gsize = effsize.get(args['genome'], None)
+
+    ## command
+    bamcoverage_exe = which('bamCoverage')
+    if bamcoverage_exe is None:
+        raise ValueError('%10s | program not found: bamCoverage' % 'failed')
+
+    # create bam index
+    BAM(bam).index()
+
+    prefix = file_prefix(bam)[0]
+    bw_log = os.path.join(path_out, prefix + '.deeptools.log')
+    logging.info('create bigWig for: %s' % prefix)
+    
+    ## genome
+    if gsize is None:
+        ## no model organism
+        opt1 = ''
+    else:
+        opt1 = '--effectiveGenomeSize ' + str(gsize)
+
+    ## filt RNA strand
+    if args['filterRNAstrand'] is None:
+        bw_file = os.path.join(path_out, prefix + '.bigWig')
+        opt2 = ''
+    else:
+        if args['filterRNAstrand'] == 'forward':
+            if args['library_type'] == 2:
+                bw_file = os.path.join(path_out, prefix + '.rev.bigWig')
+            else:
+                bw_file = os.path.join(path_out, prefix + '.fwd.bigWig')
+        elif args['filterRNAstrand'] == 'reverse':
+            if args['library_type'] == 2:
+                bw_file = os.path.join(path_out, prefix + '.fwd.bigWig')
+            else:
+                bw_file = os.path.join(path_out, prefix + '.rev.bigWig')
+        else:
+            logging.error('argument --filterRNAstrand: invalid choice: (\'forward\', \'reverse\')')
+        opt2 = '--filterRNAstrand ' + str(args['filterRNAstrand'])
+
+    ## opt
+    opt3 = '--scaleFactor %s -b %s -o %s --binSize %s -p %s' % (scale, bam, bw_file, args['binsize'], args['p'])
+
+    ## cmd
+    cmd = ' '.join([bamcoverage_exe, opt1, opt2, opt3])
+    
+    ## run
+    if os.path.exists(bw_file) and not args['overwrite']:
+        logging.info('file exists, skipped: %s' % bam)
+    else:
+        bw_log = os.path.splitext(bw_file)[0] + '.log'
+        with open(bw_log, 'wt') as fo:
+            p = subprocess.run(shlex.split(cmd), stdout=fo, stderr=fo)
+
+    ## check rresults
+    if not os.path.exists(bw_file):
+        raise Exception('bamCoverage failed, output not found: %s' % bw_file)
+
+    ## return
+    return bw_file
+
 
 
 ################################################################################
