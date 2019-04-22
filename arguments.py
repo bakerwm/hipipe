@@ -41,7 +41,7 @@ def args_init(args=None, demx=False, trim=False, align=False, call_peak=False, b
 
         ## trimming
         if trim:
-            args['adapter3'] = args.get('adapter3', 'AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC')
+            args['adapter3'] = args.get('adapter3', ['AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC'])
             args['len_min']  = args.get('len_min', 15)
             args['adapter5'] = args.get('adapter5', '')
             args['qual_min'] = args.get('qual_min', 20)
@@ -49,6 +49,9 @@ def args_init(args=None, demx=False, trim=False, align=False, call_peak=False, b
             args['overlap'] = args.get('overlap', 3)
             args['percent'] = args.get('percent', 80)
             args['rm_untrim'] = args.get('rm_untrim', False)
+            args['save_untrim'] = args.get('save_untrim', False)
+            args['save_too_short'] = args.get('save_too_short', False)
+            args['save_too_long'] = args.get('save_too_long', False)
             args['keep_name'] = args.get('keep_name', True)
             args['adapter_sliding'] = args.get('adapter_sliding', False)
             args['trim_times'] = args.get('trim_times', 1)
@@ -56,11 +59,12 @@ def args_init(args=None, demx=False, trim=False, align=False, call_peak=False, b
             args['rm_dup'] = args.get('rm_dup', True)
             args['cut_before_trim'] = args.get('cut_before_trim', '0')
             args['cut_after_trim'] = args.get('cut_after_trim', '7,-7') # NSR
-            args['trim_to_length'] = args.get('trim_to_length', 0)
-            args['gzipped'] = args.get('gzipped', False) # output fastq
+            args['cut_to_length'] = args.get('cut_to_length', 0)
+            args['gzipped'] = args.get('gzipped', True) # output fastq
+            args['gzip'] = args.get('gzip', True) # output fastq
 
             ## PE trimming options
-            args['AD3'] = args.get('AD3', 'AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT')
+            args['AD3'] = args.get('AD3', ['AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT'])
             args['AD5'] = args.get('AD5', None)
 
         ## alignment
