@@ -149,8 +149,14 @@ def args_logger(d, x, overwrite=False):
 
 
 def is_gz(filepath):
-    with open(filepath, 'rb') as test_f:
-        return binascii.hexlify(test_f.read(2)) == b'1f8b'
+    if os.path.exists(filepath):
+        with open(filepath, 'rb') as test_f:
+            return binascii.hexlify(test_f.read(2)) == b'1f8b'
+    else:
+        if filepath.endswith('.gz'):
+            return True
+        else:
+            return False
 
 
 def xopen(fn, mode='r', bgzip=False):
@@ -304,7 +310,7 @@ def file_prefix(fn, with_path = False):
     assert isinstance(fn, str)
     p1 = os.path.splitext(fn)[0]
     px = os.path.splitext(fn)[1]
-    if px.endswith('gz') or px.endswith('.bz'):
+    if px.endswith('gz') or px.endswith('.bz2'):
         px = os.path.splitext(p1)[1] + px
         p1 = os.path.splitext(p1)[0]
     if not with_path:

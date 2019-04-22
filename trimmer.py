@@ -18,6 +18,22 @@ Trimming reads
 
 1. cutadapt log parser for PE trimming
 
+
+2019-04-22
+
+add modules
+
+Trimmer, 
+Cutter,
+DupRemover,
+LogParser,
+
+
+1. Trim adapters (ad-3, ad-5, ...)
+2. cut N-bases after trim
+3. rm duplicates
+4. cut N-bases after rm-dup
+
 """
 
 import os
@@ -29,8 +45,649 @@ import logging
 from utils_parser import *
 from helper import *
 from arguments import args_init
+# from helper import is_gz, is_path, xopen, file_prefix, which
 
+
+class Fastx(object):
+    """Collection of tools to manipulate fastx file
+    1. trimmer: cutadapt [trimmomatic, ...]
+    2. collapse: fastx_collapse [fastx_toolkit]
+    3. collapse: seqkit rmdup [faster, discard read numbers]
+    4. fq2fa: fastq_to_fasta [fastx_toolkit]
+    5. fa2fq: [fasta_to_fastq.pl]
+    6. revcomp: [seqkit seq]
+    7. sample: [seqkit sample -n]
+    ...
+    """
+    def __init__(self, fx_input, path_out, **kwargs):
+
+        ## init args
+        overwrite = kwargs.get('overwrite', False)
+        output_fasta = kwargs.get('output_fasta', False)
+        gzip = kwargs.get('gzip', True)
+
+        ## sequence type
+        fx_type = seq_type(fx_input) # fastq, fasta, None
+        if fx_type is None:
+            raise Exception('unknown input file type. expect [fastq, fasta]')
+
+        ## output filename
+        fx_prefix = file_prefix(fx_input)[0]
+        if output_fasta:
+            output_suffix = 'fasta'
+        else:
+            output_suffix = fx_type
+        fx_output = os.path.join(path_out, fx_prefix + '.' + output_suffix)
+
+        if gzip:
+            fx_output += '.gz'
+
+        ## check file exist
+        is_path(path_out)
+        if os.path.exists(fx_output) and overwrite is False:
+            logging.info('output file exists. try overwrite=True ?')
+            return True
+
+        self.input = fx_input
+        self.path_out = path_out
+        self.output = fx_output
+        self.fx_type = fx_type
+        self.gzip = gzip
+        self.overwrite = overwrite
+        self.output_fasta = output_fasta
+        self.args = kwargs
+
+
+    def trimmer(self, len_min=20, cut_left=0, cut_right=0, 
+        cut_to_length=0, cut_from_right=True):
+        """Cut N-bases from fastq or fasta file
+        cut_left: 5' end of read
+        cut_right: 3' end of read
+        cut_to_length: cut from right (default)
+
+        1. cut first N bases
+        2. cut last N bases
+        3. cut from right, keep specific length
+        4. specific length (seqkit subseq, bioawk, ...)
+
+        Using fastx_toolkit
+        http://hannonlab.cshl.edu/fastx_toolkit/
+        """
+        ## external program
+        cut_exe = which('fastx_trimmer')
+        seqkit_exe = which('seqkit')
+        if cut_exe is None:
+            raise Exception('command not found in $PATH: fastx_trimmer')
+        if seqkit_exe is None:
+            raise Exception('command not found in $PATH: seqkit')
+
+        ## option-0
+        ## filter by length
+        cmdx = '%s seq -m %s' % (seqkit_exe, len_min)
+
+        ## option-1
+        ## cut left
+        ## fastx_trimmer -f <cut_left> -m <len_min>
+        cut_left += 1
+        cmd1 = '%s -f %s' % (cut_exe, cut_left)
+
+        ## option-2
+        ## cut right
+        cmd2 = '%s -t %s -m %s' % (cut_exe, cut_right, len_min)
+
+        ## option-3
+        ## cut to length
+        cmd3 = '%s -l %s' % (cut_exe, cut_to_length)
+
+        ## fastq file
+        if self.fx_type == 'fastq':
+            cmd1 += ' -Q33'
+            cmd2 += ' -Q33'
+            cmd3 += ' -Q33'
+
+        ## combine options
+        if cut_to_length > 0:
+            ## len_min
+            if cut_to_length < len_min:
+                raise Exception('arguments conflic, cut_to_length=%s short than len_min=%s' % (cut_to_length, len_min))
+            ## cut from right
+            if cut_from_right:
+                with xopen(self.input, 'r') as fi, xopen(self.output, 'w') as fo:
+                    print(cmd3)
+                    print(cmdx)
+                    p1 = subprocess.Popen(cmd3, shell=True, stdin=fi, stdout=subprocess.PIPE)
+                    p2 = subprocess.Popen(cmdx, shell=True, stdin=p1.stdout, stdout=subprocess.PIPE)
+                    for line in p2.stdout:
+                        fo.write(line)
+                    ret_code = p2.communicate()
+            else:
+                revcomp = which('fastx_reverse_complement')
+                if revcomp is None:
+                    raise Exception('command not found in $PATH: fastx_reverse_complement')
+                with xopen(self.input, 'r') as fi, xopen(self.output, 'w') as fo:
+                    p1 = subprocess.Popen(revcomp, shell=True, stdin=fi, stdout=subprocess.PIPE)
+                    p2 = subprocess.Popen(cmd3, shell=True, stdin=p1.stdout, stdout=subprocess.PIPE)
+                    p3 = subprocess.Popen(cmdx, shell=True, stdin=p2.stdout, stdout=subprocess.PIPE)
+                    p4 = subprocess.Popen(revcomp, shell=True, stdin=p3.stdout, stdout=subprocess.PIPE)
+                    for line in p4.stdout:
+                        fo.write(line)
+                    ret_code = p4.communicate()
+
+        elif cut_left > 0 and cut_right > 0:
+            ## run program
+            with xopen(self.input, 'r') as fi, xopen(self.output, 'w') as fo:
+                p1 = subprocess.Popen(cmd1, shell=True, stdin=fi, stdout=subprocess.PIPE)
+                p2 = subprocess.Popen(cmd2, shell=True, stdin=p1.stdout, stdout=subprocess.PIPE)
+                for line in p2.stdout:
+                    fo.write(line)
+                ret_code = p2.communicate()
+
+        elif cut_left > 0:
+            ## left
+            with xopen(self.input, 'rb') as fi, xopen(self.output, 'wb') as fo:
+                p1 = subprocess.Popen(cmd1, shell=True, stdin=fi, stdout=subprocess.PIPE)
+                p2 = subprocess.Popen(cmdx, shell=True, stdin=p1.stdout, stdout=subprocess.PIPE)
+                # write to file
+                for line in p2.stdout:
+                    fo.write(line)
+                ret_code = p2.communicate() # wait exteral code finish
+                # see https://www.jianshu.com/p/11d3a0a9c7d1
+
+        elif cut_right > 0:
+            ## right
+            with xopen(self.input, 'r') as fi, xopen(self.output, 'w') as fo:
+                p1 = subprocess.Popen(cmd2, shell=True, stdin=fi, stdout=subprocess.PIPE)
+                for line in p1.stdout:
+                    fo.write(line)
+                p1.communicate()
+        else:
+            ## no
+            pass
+
+
+    def rmdup(self):
+        """Remove PCR duplicates (sequence) 
+        fastx_collapser
+        fasta_to_fastq
+        """
+        fastx_collapser = which('fastx_collapser')
+        if fastx_collapser is None:
+            raise Exception('command not found in $PATH: fastx_collapser')
+
+        cmd = fastx_collapser
+        if self.fx_type == 'fastq':
+            cmd += ' -Q33'
+
+        if self.output_fasta:
+            # require
+            # 1. collapser
+            with xopen(self.input, 'rt') as fi, xopen(self.output, 'wt') as fo:
+                p = subprocess.Popen(cmd, shell=True, stdin=fi, stdout=subprocess.PIPE)
+                for line in p.stdout:
+                    fo.write(line)
+                re_code = p.communicate()
+        else:
+            # require
+            # 1. collapser
+            # 2. fa2fq
+            with xopen(self.input, 'rt') as fi, xopen(self.output, 'wt') as fo:
+                p = subprocess.Popen(cmd, shell=True, stdin=fi, stdout=subprocess.PIPE)
+                name = None
+                for line in p.stdout:
+                    if line.startswith('>'):
+                        if isinstance(name, str):
+                            fo.write('\n'.join(['@' + name, sequence, '+', seq_quality]) + '\n')
+                        name = line.strip()
+                        sequence = ""
+                        seq_quality = ""
+                    else:
+                        sequence += line.strip()
+                        seq_quality = 'J' * len(sequence)
+                # the last record
+                fo.write('\n'.join(['@' + name, sequence, '+', seq_quality]) + '\n')
+                re_code = p.communicate()
+
+
+    def revcomp(self):
+        """Reverse complement sequences"""
+        revcomp = which('fastx_reverse_complement')
+        if revcomp is None:
+            raise Exception('command not found in $PATH: fastx_reverse_complement')
+
+        cmd = revcomp
+        if self.fx_type == 'fastq':
+            cmd += ' -Q33'
+
+        with xopen(self.input, 'r') as fi, xopen(self.output, 'w') as fo:
+            p = subprocess.Popen(cmd, shell=True, stdin=fi, stdout=subprocess.PIPE)
+            for line in p.stdout:
+                fo.write(line)
+            p.communicate()
+
+
+    def sample(self, n=1000, p=0.01):
+        """Extract sample size of fastx file
+        using seqkit tool
+
+        $ seqkit sample -n 1000
+
+        $ seqkit sample -p 0.01
+
+        """
+
+        seqkit = which('seqkit')
+        if seqkit is None:
+            raise Exception('command not found in $PATH: seqkit')
+
+        assert isinstance(n, int)
+        assert isinstance(p, float)
+
+        ## warning
+        if n > 1000000 or p > 0.1:
+            logging.warning('choose a smaller number.')
+
+        cmd = '%s sample -n %s' % (seqkit, n)
+
+        with xopen(self.input, 'r') as fi, xopen(self.output, 'w') as fo:
+            p = subprocess.Popen(cmd, shell=True, stdin=fi, stdout=subprocess.PIPE)
+            for line in p.stdout:
+                fo.write(line)
+            p.communicate()
+
+
+    def fa2fq(self, fa, fq):
+        """Convert fasta to fastq, quality=J
+        fasta
+
+        >name
+        sequence
+
+
+        fastq
+
+        @name
+        sequence
+        +
+        quality
+        """
+        with xopen(fa, 'rt') as fi, xopen(fq, 'wt') as fo:
+            name = None
+            for line in fi:
+                if line.startswith('>'):
+                    if isinstance(name, str):
+                        fo.write('\n'.join(['@' + name, sequence, '+', seq_quality]) + '\n')
+                    name = line.strip()
+                    sequence = ""
+                    seq_quality = ""
+
+                else:
+                    sequence += line.strip()
+                    seq_quality = 'J' * len(sequence)
+            # the last record
+            fo.write('\n'.join(['@' + name, sequence, '+', seq_quality]) + '\n')
+
+
+    def fq2fa(self):
+        pass
+
+
+class Cutadapt(object):
+    """Cut adapters using cutadapt
+    1. cut 3-ad
+    2. cut 5-ad
+    3. save log
+
+    both SE and PE reads
+
+    """
+    def __init__(self, fq1, adapter3, path_out=None, len_min=15, **kwargs):
+        """Parsing the parameters for reads trimming
+        support both SE and PE reads
+        """
+        assert isinstance(fq1, str) # process one file
+        args = args_init(kwargs) # default parameters
+        # print(args)
+        args['fq1'] = fq1
+        args['adapter3'] = adapter3
+        args['path_out'] = path_out
+        args['len_min'] = len_min
+        # args2 = {
+        #     'fq1': fq1,
+        #     'adapter3': adapter3,
+        #     'path_out': path_out,
+        #     'len_min': len_min}
+        # args = {**args1, **args2}
+
+        ## validate options
+        assert is_path(path_out)
+        if args['cut_to_length'] > 0 and args['cut_to_length'] < len_min:
+            raise Exception('illegal length, --trim-to-length %s --len-min %s' % (args['cut_to_length'], len_min))
+
+        self.kwargs = args # global
+
+
+    def cutadapt_init(self, fq1_in=None, fq2_in=None):
+        """Prepare directory for trimming, filename for each file
+        fq
+        fq_clean
+        fq_log
+        fq_untrim
+        fq_too_short
+        fq_too_long
+        """
+        args = self.kwargs.copy()
+        if fq1_in is None:
+            fq1_in = args['fq1']
+        if fq2_in is None:
+            fq2_in = args['fq2']
         
+        ## fq1
+        fq1_prefix = file_prefix(fq1_in)[0]
+        fq1_type = seq_type(fq1_in)
+        ## file type
+        if fq1_type is None:
+            raise Exception('unknown filetype, only support: [fasta, fastq]')
+        ## file name
+        fq1_clean_prefix = os.path.join(args['path_out'], fq1_prefix)
+        if args['keep_name']:
+            fq1_clean = fq1_clean_prefix + '.' + fq1_type
+        else:
+            fq1_clean = fq1_clean_prefix + '.clean.' + fq1_type
+        ## other files
+        fq1_log = fq1_clean_prefix + '.cutadapt.log'
+        fq1_untrim = fq1_clean_prefix + '.untrim.' + fq1_type
+        fq1_too_short = fq1_clean_prefix + '.tooshort.' + fq1_type
+        fq1_too_long = fq1_clean_prefix + '.toolong.' + fq1_type
+        
+        # SE mode
+        if args['fq2'] is None:
+            return [fq1_prefix, fq1_clean, fq1_log, 
+                fq1_untrim, fq1_too_short, fq1_too_long]
+
+        # PE mode
+        elif os.path.exists(args['fq2']):
+            fq2_prefix = file_prefix(fq2_in)[0]
+            fq2_type = seq_type(fq_in)
+            ## file type
+            if fq2_type is None:
+                raise Exception('unknown filetype, only support: [fasta, fastq]')
+            ## file name
+            fa2_clean_prefix = os.path.join(args['path_out'], fq2_prefix)
+            if args['keep_name']:
+                fq2_clean = fq2_clean_prefix + '.' + fq2_type
+            else:
+                fq2_clean = fq2_clean_prefix + '.clean.' + fq2_type
+            ## other files
+            fq2_untrim = fq2_clean_prefix + '.untrim.' + fq2_type
+            fq2_too_short = fq2_clean_prefix + '.tooshort.' + fq2_type
+            fq2_too_long = fq2_clean_prefix + '.toolong.' + fq2_type
+            return [fq1_prefix, fq1_clean, fq2_clean, fq1_log, 
+                fq1_untrim, fq2_untrim, fq1_too_short, fq2_too_short, 
+                fq1_too_long, fq2_too_long]
+        else:
+            raise ValueError('checkout -fq2 option')
+
+
+    def get_cutadapt_cmd(self):
+        """Parse arguments, create cutadapt command line
+        SE: 
+        cutadapt -a ADAPTER_FWD -A ADAPTER_REV reads.fastq 1> clean.fq 2> log
+
+        --minimum-length=LENGTH
+        --max-n=COUNT
+        --discard-untrimmed
+        --discard-trimmed
+        --length=LENGTH
+        --too-short-output=FILE
+        --too-long-output=FILE
+        --untrimmed-output=FILE
+
+        PE:
+        cutadapt -a ADAPTER_FWD -A ADAPTER_REV -o out.1.fastq -p out.2.fastq reads.1.fastq reads.2.fastq
+
+        -A  see -a for read1
+        -G  see -g for read1
+        -B  see -b for read1
+        -u  see --cut for read1
+
+        -p  write the second read to FILE
+        --untrimmed-paired-output  write the second read in a pair to this FILE when no
+            adapter was found in the first read. together with --untrimmed-output
+        --too-short-paired-output  write the second read in a pair to this FILE if pair
+            is too short, together with --too-short-output
+        --too-long-paired-output    write the second read in a pair to this FILE if pair
+            is too long, together with --too-long-output
+
+        """
+        args = self.kwargs.copy()
+
+        ## command
+        cutadapt = which('cutadapt')
+
+        ## basic
+        cmd_basic = '%s -m %s -q %s --overlap=%s --error-rate=%s \
+            --trim-n --max-n=0.1 --times=%s' % (
+            cutadapt,
+            args['len_min'],
+            args['qual_min'],
+            args['overlap'],
+            args['error_rate'],
+            args['trim_times'])
+
+        ## option-1: adapter
+        ## 3-adapters
+        ad3_list = args['adapter3']
+
+        ## short version of adapter
+        if args['adapter_sliding']:
+            ad3_list = self.adapter_chopper(args['adapter3'])
+            # ad3_list.extend(ad3_ext)
+        args_ad3 = ' '.join(['-a ' + i for i in ad3_list])
+
+
+        ## default: SE mode
+        if args['fq2'] is None:
+            fq_prefix, fq_clean, fq_log, fq_untrim, fq_too_short, fq_too_long = self.cutadapt_init()
+
+            ## option-2: filter
+            ## 2.1 untrim
+            if args['save_untrim']:
+                args_untrim = '--untrimmed-output=%s --cores=1' % fq_untrim
+            elif args['rm_untrim']:
+                args_untrim = '--discard-trimmed --cores=%s' % args['threads']
+            else:
+                args_untrim = '--cores=%s' % args['threads']
+
+            ## 2.2 too-short
+            if args['save_too_short']:
+                args_too_short = '--too-short-output=%s' % fq_too_short
+            else:
+                args_too_short = ''
+
+            ## 2.3 too-long
+            if args['save_too_long']:
+                args_too_long = '--too-long-output=%s' % fq_too_long
+            else:
+                args_too_long = ''
+
+            ## 2.4 cut-to-length
+            if args['cut_to_length'] >= args['len_min']:
+                args_cut_to_length = '--length=%s' % args['cut_to_length']
+            else:
+                args_cut_to_length = ''
+
+            ## SE command
+            cmd = ' '.join([cmd_basic, args_ad3, args_untrim, args_too_short, 
+                args_too_long, args_cut_to_length, args['fq1']])
+
+        ## PE command
+        elif args['fq2']:
+            tmp = self.cutadapt_init()
+            ## too-long in one-line
+            fq1_prefix, fq1_clean, fq2_clean, fq1_log = tmp[:4]
+            fq1_untrim, fq2_untrim, fq1_too_short, fq2_too_short = tmp[4:8]
+            fq1_too_long, fq2_too_long = tmp[8:]
+            
+            ## option-1: adapter
+            AD3_list = [args['AD3']]
+            if args['adapter_sliding']:
+                AD3_list = self.adapter_chopper(args['AD3'])
+                # AD3_list.extend(AD3_ext)
+            args_AD3 = ' '.join(['-A ' + i for i in AD3_list])
+
+            ## option-2: filter
+            ## 2.1 untrim 
+            args_untrim = '-o %s --paired-output=%s' % (fq1_clean, fq2_clean)
+            if args['save_untrim']:
+                args_untrim += ' --untrimmed-output=%s \
+                    --untrimmed-paired-output=%s --cores=1' % (fq1_untrim, fq2_untrim)
+            elif args['rm_untrim']:
+                args_untrim += ' --discard-trimmed --cores=%s' % args['threads']
+            else:
+                args_untrim += ' --cores=%s' % args['threads']
+
+            ## 2.2 too-short
+            if args['save_too_short']:
+                args_too_short = '--too-short-output=%s \
+                    --too-short-paired-output=%s' % (
+                        fq1_too_short,
+                        fq2_too_short)
+            else:
+                args_too_short = ''
+
+            ## 2.3 too-long
+            if args['save_too_long']:
+                args_too_long = '--too-long-output=%s \
+                    --too-long-paired-output=%s' % (
+                        fq1_too_long,
+                        fq2_too_long)
+
+            ## 2.4 cut-to-length
+            if args['cut_to_length'] >= args['len_min']:
+                args_cut_to_length = '--length=%s' % args['cut_to_length']
+            else:
+                args_cut_to_length = ''                    
+
+            cmd = ' '.join([cmd_basic, args_ad3, args_AD3, args_untrim, 
+                args_too_short, args_too_long, args_cut_to_length, 
+                args['fq1'], args['fq2']])
+        # others
+        else:
+            raise Exception('illegal --fq2')
+
+        return cmd
+
+
+    def trim_se(self):
+        """Trimming SE reads using cutadapt
+        cutadapt -a ADAPTER_FWD -A ADAPTER_REV reads.fastq 1> clean.fq 2> log
+        """
+        args = self.kwargs.copy()
+        fq_prefix, fq_clean, fq_log, fq_untrim, fq_too_short, fq_too_long = self.cutadapt_init()
+        logging.info('trimming SE reads: %s' % fq_prefix)
+
+        cmd = self.get_cutadapt_cmd()
+        ## gzip file
+        if args['gzip']:
+            fq_clean += '.gz'
+        ## run program
+        if os.path.exists(fq_clean) and args['overwrite'] is False:
+            logging.info('file exists, cutadapt skipped: %s' % fq_prefix)
+        else:
+            with xopen(fq_clean, 'wb') as fo, open(fq_log, 'wt') as flog:
+                p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=flog)
+                for line in p.stdout:
+                    fo.write(line)
+                p.communicate()
+            Cutadapt_log(fq_log).saveas()
+        return fq_clean
+
+
+    def trim_pe(self):
+        """Trimming Paired-end reads using cutadapt
+        example: 
+        cutadapt -a ADAPTER_FWD -A ADAPTER_REV -o out.1.fastq -p out.2.fastq reads.1.fastq reads.2.fastq
+        """
+        args = self.kwargs.copy()
+        fq1_prefix, fq1_clean, fq2_clean, fq1_log = self.cutadapt_init()[:4]
+        logging.info('trimming PE reads: %s' % fq1_prefix)
+
+        cmd = self.get_cutadapt_cmd()
+        ## check exists
+        fq1_check = fq1_clean
+        fq2_check = fq2_clean
+        if args['gzip']:
+            fq1_check += '.gz'
+            fq2_check += '.gz'
+        ## compress fastq file after cutadapt
+        if os.path.exists(fq1_check) and os.path.exists(fq2_check) and args['overwrite'] is False:
+            logging.info('file exists, cutadapt skipped: %s' % fq1_prefix)
+        else:
+            with open(fq1_log, 'wt') as fo:
+                p1 = subprocess.run(shlex.split(arg_cmd), stdout=fo, stderr=fo)
+                # Cutadapt_log(fq_log).saveas()
+        return [fq1_clean, fq2_clean]
+
+
+    def run(self):
+        """Run trimming for all"""
+        args = self.kwargs.copy()
+
+        args_init = self.cutadapt_init()
+        fq_prefix, fq1_clean = args_init[:2]
+
+        ## save arguments
+        args_file = os.path.join(args['path_out'], fq_prefix + '.arguments.txt')
+        args_pickle = os.path.join(args['path_out'], fq_prefix + '.arguments.pickle')
+        if args_checker(args, args_pickle) and args['overwrite'] is False:
+            logging.info('arguments not changed, trimming skipped - %s' % fq_prefix)
+            ## SE mode
+            if args['fq2'] is None:
+                return_fq = fq1_clean
+                if args['gzip']:
+                    return_fq += '.gz'
+            ## PE mode
+            else:
+                fq2_clean = args_init[2]
+                return_fq = [fq1_clean, fq2_clean]
+                if args['gzip']:
+                    return_fq = [fq1_clean + '.gz', fq2_clean + '.gz']
+        else:
+            ## run program
+            args_logger(args, args_file, overwrite=True) # update arguments.txt
+            ## SE mode
+            if args['fq2'] is None:
+                fq1_clean = self.trim_se() # fq1
+                return_fq = fq1_clean
+                ## write to gzip file using gzip.open()
+                # ## gzip compress files
+                # if args['gzip']:
+                #     fq1_clean = gzip_file(return_fq, rm=True)
+                #     return_fq = fq1_clean
+            else:
+                return_fq = self.trim_pe() # fq1, fq2
+                ## gzip compress files
+                if args['gzip']:
+                    fq1_clean = gzip_file(return_fq[0], rm=True)
+                    fq2_clean = gzip_file(return_fq[1], rm=True)
+                    return_fq = [fq1_clean, fq2_clean]
+
+            ## save read count
+            fq_count_file = os.path.join(args['path_out'], fq_prefix + '.clean_reads.txt')
+            if not os.path.exists(fq_count_file) or args['overwrite'] is True:
+                fq_count = int(file_row_counter(fq1_clean) / 4)
+                with open(fq_count_file, 'wt') as fo:
+                    fo.write(str(fq_count) + '\n')
+
+        return return_fq
+
+
+class 
+
+
+
+
+      
 class Trimmer(object):
     """Trim fastq files by 3' adapter, further quality control
     ## Required
@@ -83,8 +740,8 @@ class Trimmer(object):
 
         ## validate options
         assert is_path(path_out)
-        if args['trim_to_length'] > 0 and args['trim_to_length'] < len_min:
-            raise ValueError('[fatal] --trim-to-length [%s] shorter than -m [%s]') % (args['trim_to_length'], len_min)
+        if args['cut_to_length'] > 0 and args['cut_to_length'] < len_min:
+            raise ValueError('[fatal] --trim-to-length [%s] shorter than -m [%s]') % (args['cut_to_length'], len_min)
 
         self.kwargs = args # global 
 
@@ -396,8 +1053,8 @@ class Trimmer(object):
                         fq_seq = fq_seq[trim_5:trim_3] if(trim_3 < 0) else fq_seq[trim_5:]
                         fq_qual = fq_qual[trim_5:trim_3] if(trim_3 < 0) else fq_qual[trim_5:]
                     # trim to length
-                    if args['trim_to_length'] > args['len_min']:
-                        n_right = min([args['trim_to_length'], len(fq_seq)])
+                    if args['cut_to_length'] > args['len_min']:
+                        n_right = min([args['cut_to_length'], len(fq_seq)])
                         fq_seq = fq_seq[:n_right]
                         fq_qual = fq_qual[:n_right]
                     ff.write('\n'.join([fq_id, fq_seq, fq_plus, fq_qual]) + '\n')
@@ -429,7 +1086,7 @@ class Trimmer(object):
                                                        next(fi).strip(),
                                                        next(fi).strip(),
                                                        next(fi).strip()]
-                    n_right = min([args['trim_to_length'], len(fq_seq)])
+                    n_right = min([args['cut_to_length'], len(fq_seq)])
                     fq_seq = fq_seq[:n_right]
                     fq_qual = fq_qual[:n_right]
                     ff.write('\n'.join([fq_id, fq_seq, fq_plus, fq_qual]) + '\n')
@@ -471,8 +1128,8 @@ class Trimmer(object):
             os.remove(fq_tmp2)
 
         ## 5. cut to specific length
-        if args['trim_to_length'] > args['len_min']:
-            fq_tmp3 = fq_in + '.before_trim_to_length.tmp'
+        if args['cut_to_length'] > args['len_min']:
+            fq_tmp3 = fq_in + '.before_cut_to_length.tmp'
             os.rename(fq_clean, fq_tmp3)
             fq_clean = self.cut_ends2(fq_in=fq_tmp3, fq_out=fq_clean)
             os.remove(fq_tmp3)
@@ -507,9 +1164,9 @@ class Trimmer(object):
             os.remove(fq2_tmp1)
 
         ## 4. cut to specific length
-        if args['trim_to_length'] > args['len_min']:
-            fq1_tmp2 = fq1_clean + '.before_trim_to_length.tmp'
-            fq2_tmp2 = fq2_clean + '.before_trim_to_legnth,tmp'
+        if args['cut_to_length'] > args['len_min']:
+            fq1_tmp2 = fq1_clean + '.before_cut_to_length.tmp'
+            fq2_tmp2 = fq2_clean + '.before_cut_to_length,tmp'
             os.rename(fq1_clean, fq1_tmp2)
             os.rename(fq2_clean, fq2_tmp2)
             fq1_clean = self.cut_ends2(fq_in=fq1_tmp2, fq_out=fq1_clean)
