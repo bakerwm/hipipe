@@ -205,25 +205,36 @@ def seq_type(fn, top_n = 1000):
     identify @ for fastq, > for fasta, * unknown
     """
     assert isinstance(fn, str)
-    tag = set()
-    with xopen(fn, 'rt') as fi:
-        for i, line in enumerate(fi):
-            if i > top_n:
-                break
-            elif i % 4 == 0:
-                b = line[0] # the first base
-                if b.lower() in 'acgtn':
-                    continue
+    if os.path.exists(fn):
+        tag = set()
+        with xopen(fn, 'rt') as fi:
+            for i, line in enumerate(fi):
+                if i > top_n:
+                    break
+                elif i % 4 == 0:
+                    b = line[0] # the first base
+                    if b.lower() in 'acgtn':
+                        continue
+                    else:
+                        tag.add(line[0])
                 else:
-                    tag.add(line[0])
-            else:
-                continue
-    if tag ==  {'@'}:
-        return 'fastq'
-    elif tag ==  {'>'}:
-        return 'fasta'
+                    continue
+        if tag ==  {'@'}:
+            fx_type = 'fastq'
+        elif tag ==  {'>'}:
+            fx_type = 'fasta'
+        else:
+            fx_type = None
     else:
-        return None
+        fn_name = os.path.basename(fn).lower()
+        if '.fa' in fn_name or '.fasta' in fn_name:
+            fx_type = 'fasta'
+        elif '.fq' in fn_name or '.fastq' in fn_nmae:
+            fx_type = 'fastq'
+        else:
+            fx_type = None
+
+    return fx_type
 
 
 def is_fastq(fn):
@@ -255,6 +266,25 @@ def file_row_counter(fn):
     freader = gzip.open if is_gz(fn) else open
     with freader(fn, 'rt', encoding="utf-8", errors='ignore') as fi:
         return sum(bl.count('\n') for bl in blocks(fi))
+
+
+def fx_counter(fn):
+    """Count fastq and fasta file
+    only support:
+    sequence in one line:
+    fastq: 1 record = 4-line
+    fasta: 1 record = 2-line
+    """
+    fx_type = seq_type(fn)
+    fx_lines = file_row_counter(fn)
+    if is_empty_file(fn):
+        return 0
+    elif fx_type == 'fasta':
+        return int(fx_lines / 2)
+    elif fx_type == 'fastq':
+        return int(fx_lines / 4)
+    else:
+        return None
 
 
 def str_common(strList, suffix = False):
@@ -348,6 +378,28 @@ def filename_shorter(fn, with_path=False):
     if not with_path:
         p2 = os.path.basename(p2)
     return p2 + px
+
+
+def rm_file(x):
+    """remove files"""
+    if isinstance(x, str):
+        if os.path.exists(x):
+            logging.info('removing file: %s' % x)
+            os.remove(x)
+        else:
+            logging.info('file does not exists: %s' % x)
+    elif isinstance(x, list):
+        tmp = [rm_file(i) for i in x]
+
+
+def is_empty_file(x):
+    """Test if file is empty
+    Return True fi the uncompressed data in x have zero length
+    or x itself has zero length
+    """
+    with xopen(x, 'rb') as fi:
+        data = fi.read(1)
+    return len(data) == 0
 
 
 ################################################################################
