@@ -46,6 +46,9 @@ logging.basicConfig(format = '[%(asctime)s] %(message)s',
 
 class Kraken2(object):
     """Run taxonomic classification using program kraken2. (version 2.0.7-beta)
+
+    $ kraken2 --db <path-to-db> 
+
     mission:
 
     1. Construct database
@@ -59,7 +62,7 @@ class Kraken2(object):
     """
 
     def __init__(self, input, outdir, kraken2_db, kraken2_exe=None, 
-        threads=16, overwrite=False):
+        threads=16, unmap_file=None, overwrite=False):
         """retrieve the input fastq file, outdir director,
         check kraken2 from your PATH
         specify db_path
@@ -94,10 +97,23 @@ class Kraken2(object):
             args = ''
             prefix = os.path.splitext(os.path.basename(input))[0]
 
+        ## output unmap
+        if isinstance(unmap_file, str):
+            args += ' --unclassified-out ' + unmap_file
+
         kraken2_log = os.path.join(outdir, prefix + '.kraken2.log')
         kraken2_output = os.path.join(outdir, prefix + '.kraken2.out')
         kraken2_report = os.path.join(outdir, prefix + '.kraken2.report')
+        kraken2_stat = os.path.join(outdir, prefix + '.kraken2.stat')
 
+        ## extra args
+        args += ' --db %s --threads %d --use-names --output %s --report %s' % (kraken2_db,
+            threads, kraken2_output, kraken2_report)
+
+        # ## prepare cmd
+        # cmd = '%s %s --threads %d --use-names --db %s --output %s --report %s %s' % (kraken2_exe, 
+        #     args, threads, kraken2_db, kraken2_output, kraken2_report, input)
+        
         ## arguments
         self.input = input
         self.outdir = outdir
@@ -110,6 +126,7 @@ class Kraken2(object):
         self.kraken2_log = kraken2_log
         self.kraken2_output = kraken2_output
         self.kraken2_report = kraken2_report
+        self.kraken2_stat = kraken2_stat
 
 
     def which(self, program):
@@ -298,12 +315,14 @@ class Kraken2(object):
         """Run Kraken2 program
         output
         """
-        self.install_kraken2()
+        # self.install_kraken2()
 
         ## cmd
-        cmd = '%s %s --threads %d --use-names --db %s --output %s --report %s %s' % (self.kraken2_exe, self.args,
-            self.threads, self.kraken2_db, self.kraken2_output, self.kraken2_report, self.input)
+        # cmd = '%s %s --threads %d --use-names --db %s --output %s --report %s %s' % (self.kraken2_exe, self.args,
+        #     self.threads, self.kraken2_db, self.kraken2_output, self.kraken2_report, self.input)
         
+        cmd = '%s %s %s' % (self.kraken2_exe, self.args, self.input)
+
         # sys.exit(cmd)
         ## run
         logging.info('Running Kraken2')
@@ -324,7 +343,7 @@ class Kraken2(object):
         if header == 'Loading database information... done.':
             logging.info('\n'.join(log_content) + '\n')
         else:
-            sys.exit('Kraken2 failed, see log : %s' % log)
+            sys.exit('Kraken2 failed, see log : %s' % self.kraken2_log)
 
 
     def stat(self):
@@ -393,8 +412,13 @@ class Kraken2(object):
 
         ## sub-sample
         df_rpt = df.loc[0:topN, ['sample', 'name', 'reads_in_tax', 'hit_pct', 'reads_hit', 'reads_total']]
+        ## custome options
+
         with pd.option_context('display.expand_frame_repr', False, 'display.max_colwidth', 100):
             print(df_rpt)
+
+        df_rpt.to_csv(self.kraken2_stat, sep='\t', index=False)
+        
         return df_rpt
 
 

@@ -21,8 +21,10 @@ def get_args():
         metavar='OUTPUT',  help='The directory to save results. (default:\
         current directory)')
     parser.add_argument('--db', required=True, help='Path to Kraken2 database')
-    parser.add_argument('--top-species', default=10, type=int, dest='topN',
+    parser.add_argument('--top-n', default=10, type=int, dest='topN',
         help='Show topN species. (default: 10)')
+    parser.add_argument('--unmap-file', default=None, dest='unmap_file',
+        help='Save unclassified reads to file')
     parser.add_argument('--kraken2', default=None, 
         help='Path to the Kraken2 script. default, search in $PATH')
     parser.add_argument('-p', '--threads', default=16, type=int, dest='threads',
@@ -40,7 +42,7 @@ def main():
         args.path_out = str(pathlib.Path.cwd())
     ## run
     for fq in args.fq:
-        k = Kraken2(fq, args.path_out, args.db, args.kraken2, args.threads, args.overwrite)
+        k = Kraken2(fq, args.path_out, args.db, args.kraken2, args.threads, args.unmap_file, args.overwrite)
         k.report(args.topN)
 
 
