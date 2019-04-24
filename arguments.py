@@ -177,7 +177,7 @@ def args_default(lib='rnaseq'):
     if lib is None:
         args_lib = {}
     elif lib in args_hiseq:
-        args_lib = args_hiseq[args['library_type']] # return dict
+        args_lib = args_hiseq[lib] # return dict
     else:
         logging.info('unknown lib : %s' % lib)
         args_lib = {}
