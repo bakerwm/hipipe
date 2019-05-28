@@ -717,6 +717,12 @@ class AlignHub(object):
             x_bam = AlignNode(**args).get_bam()
             x_unmap = AlignNode(**args).get_unmap()
 
+            # suppress --unique-only for rRNA mapping
+            index_name = AlignIndex(**args).get_index_name()
+            unique_old = args['unique_only']
+            if index_name.endswith('rRNA'):
+                args['unique_only'] = False
+
             if self.dry_run: # do not run alignment
                 pass
             else:
@@ -726,6 +732,7 @@ class AlignHub(object):
             ## update arguments
             if self.align_by_order:
                 args['fq1'] = x_unmap
+            args['unique_only'] = unique_old # update
 
             ## save bam files
             map_files.append(x_bam)

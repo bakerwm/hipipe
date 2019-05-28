@@ -62,7 +62,7 @@ def get_args():
     ## global arguments
     parser.add_argument('-m', '--len_min', default=15, metavar='len_min', 
         type=int, help='Minimum length of reads after trimming. (defualt: 15)')
-    parser.add_argument('-a', '--adapter3',  nargs='+', metavar='adapter', 
+    parser.add_argument('-a', '--adapter3', nargs='+', metavar='adapter', 
         type=str, default=['AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC'],         
         help='3-Adapter, \
         TruSeq RNAseq: AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC \
@@ -129,7 +129,7 @@ def get_args():
     ## PE arguments
     parser.add_argument('--fq2', nargs='+', default=None, 
         help='The read2 of pair-end reads')
-    parser.add_argument('-A', '--AD3', nargs='+',
+    parser.add_argument('-A', '--AD3', nargs='+', type=str,
         default=['AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT'],
         help='The 3 adapter of read2, default: AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT')
     parser.add_argument('-G', '--AD5', nargs='+',

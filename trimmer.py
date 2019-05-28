@@ -431,12 +431,12 @@ class Cutadapt(object):
         # PE mode
         elif os.path.exists(args['fq2']):
             fq2_prefix = file_prefix(fq2_in)[0]
-            fq2_type = seq_type(fq_in)
+            fq2_type = seq_type(fq2_in)
             ## file type
             if fq2_type is None:
                 raise Exception('unknown filetype, only support: [fasta, fastq]')
             ## file name
-            fa2_clean_prefix = os.path.join(args['path_out'], fq2_prefix)
+            fq2_clean_prefix = os.path.join(args['path_out'], fq2_prefix)
             if args['keep_name']:
                 fq2_clean = fq2_clean_prefix + '.' + fq2_type
             else:
@@ -533,7 +533,6 @@ class Cutadapt(object):
             ad3_list = i_list
         args_ad3 = ' '.join(['-a ' + i for i in ad3_list])
 
-
         ## default: SE mode
         if args['fq2'] is None:
             fq_prefix, fq_clean, fq_log, fq_untrim, fq_too_short, fq_too_long = self.cutadapt_init()
@@ -576,17 +575,17 @@ class Cutadapt(object):
             fq1_prefix, fq1_clean, fq2_clean, fq1_log = tmp[:4]
             fq1_untrim, fq2_untrim, fq1_too_short, fq2_too_short = tmp[4:8]
             fq1_too_long, fq2_too_long = tmp[8:]
-            
+
             ## option-1: adapter
-            AD3_list = [args['AD3']]
+            AD3_list = args['AD3']
             ## short version of adapter
             if args['adapter_sliding']:
                 i_list = []
                 for i in AD3_list:
                     i_list.extend(self.adapter_chopper(i))
                 AD3_list = i_list
-
             args_AD3 = ' '.join(['-A ' + i for i in AD3_list])
+            # args_ad3 = ' '.join(['-a ' + i for i in ad3_list])
 
             ## option-2: filter
             ## 2.1 untrim 
@@ -614,6 +613,8 @@ class Cutadapt(object):
                     --too-long-paired-output=%s' % (
                         fq1_too_long,
                         fq2_too_long)
+            else:
+                args_too_long = ''
 
             ## 2.4 cut-to-length
             if args['cut_to_length'] >= args['len_min']:
@@ -677,7 +678,7 @@ class Cutadapt(object):
             logging.info('file exists, cutadapt skipped: %s' % fq1_prefix)
         else:
             with open(fq1_log, 'wt') as fo:
-                p1 = subprocess.run(shlex.split(arg_cmd), stdout=fo, stderr=fo)
+                p1 = subprocess.run(shlex.split(cmd), stdout=fo, stderr=fo)
                 # Cutadapt_log(fq_log).saveas()
         return [fq1_clean, fq2_clean]
 
