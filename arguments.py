@@ -164,6 +164,7 @@ def args_default(lib='rnaseq'):
         'atacseq': {
             'len_min': 20,
             'adapter3': ['CTGTCTCTTATACACATCT'],
+            'AD3': ['CTGTCTCTTATACACATCT'],
             'adapter_sliding': True,
             'trim_times': 4
         },

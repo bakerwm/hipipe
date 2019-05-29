@@ -33,10 +33,11 @@ __date__ = "2018-03-21"
 __version__ = "0.1"
 
 
-import logging
+# import logging
 import argparse
 from trimmer import Trimmer
 from arguments import args_init, args_default
+from helper import *
 
 
 def get_args():
@@ -143,11 +144,20 @@ def get_args():
         specific length.')
     parser.add_argument('--keep-temp-files', action='store_true',
         dest='keep_temp_files', help='Save temporal files.')
+    parser.add_argument('--log-level', default='INFO', dest='log_level',
+                        choices=['NOTSET','DEBUG','INFO',
+                            'WARNING','CRITICAL','ERROR','CRITICAL'],
+                        help='Log level')
+    
     # parser.add_argument('--read12', type=int, default=1,
     #     help='which one of PE reads, 1=read1, 2=read2, default: 1')
     # parser.add_argument('--double-trim', action='store_true', 
     #     dest='double_trim', help='if specified, trim adapters twice')
     args = parser.parse_args()
+
+    log.setLevel(args.log_level)
+    log.info(sys.argv)
+
     return args
 
 
@@ -160,7 +170,7 @@ def main():
     args_lib = args_default(args['library_type'])
     args = {**args, **args_lib}
 
-    logging.info('trimming start')
+    log.info('trimming start')
     ## SE mode
     if args['fq2'] is None:
         for fq1 in fq1_files:
@@ -172,7 +182,7 @@ def main():
         for fq1, fq2 in zip(fq1_files, fq2_files):
             tmp = Trimmer(fq1=fq1, fq2=fq2, **args).trimmer()
 
-    logging.info('trimming finish')
+    log.info('trimming finish')
 
 
 if __name__ == '__main__':

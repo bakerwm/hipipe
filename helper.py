@@ -29,9 +29,15 @@ from requests import get  # to make GET request
 # from goldclip.helper import *
 
 
-logging.basicConfig(format = '[%(asctime)s] %(message)s', 
-                    datefmt = '%Y-%m-%d %H:%M:%S', 
-                    level = logging.DEBUG)
+# logging.basicConfig(format = '[%(asctime)s] %(message)s', 
+#                     datefmt = '%Y-%m-%d %H:%M:%S', 
+#                     level = logging.DEBUG)
+
+logging.basicConfig(
+    format='[%(asctime)s %(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    stream=sys.stdout)
+log = logging.getLogger(__name__)
 
 
 def eprint(*args, **kwargs):
@@ -51,7 +57,7 @@ def gzip_file(x, decompress=False, rm=True):
         x_ungz = os.path.splitext(x)[0] # remove extensiion
         if is_gz(x):
             if os.path.exists(x_ungz):
-                logging.info('target file exists, skip ungzip - %s' % x)
+                log.info('target file exists, skip ungzip - %s' % x)
             else:
                 with gzip.open(x, 'rb') as fi, open(x_ungz, 'wb') as fo:
                     fo.writelines(fi)
@@ -60,15 +66,15 @@ def gzip_file(x, decompress=False, rm=True):
                     os.remove(x)
             tag = x_ungz
         else:
-            logging.info('expect a gzip file, skip unzip- %s' % x)
+            log.info('expect a gzip file, skip unzip- %s' % x)
     else:
         ## compress
         xgz = x + '.gz'
         if os.path.exists(xgz):
-            logging.info('file exists , skip gzip - %s' % xgz)
+            log.info('file exists , skip gzip - %s' % xgz)
             tag = xgz
         elif is_gz(x):
-            logging.info('file is gzipped, skip gzip - %s' % x)
+            log.info('file is gzipped, skip gzip - %s' % x)
             tag = x
         else:
             with open(x, 'rb') as fi, gzip.open(xgz, 'wb') as fo:
@@ -78,6 +84,80 @@ def gzip_file(x, decompress=False, rm=True):
                 os.remove(x)
             tag = xgz
     return tag
+
+
+def gzip_file2(x, decompress=False, rm=True):
+    """Compress file using gzip command
+    """
+    assert isinstance(x, str)
+
+    tag = False
+    if decompress:
+        ## decompress
+        x_ungz = os.path.splitext(x)[0] # remove extensiion
+        if is_gz(x):
+            if os.path.exists(x_ungz):
+                log.info('target file exists, skip ungzip - %s' % x)
+            else:
+                cmd = 'gunzip {}'.format(x)
+                run_shell_cmd(cmd)
+                # with gzip.open(x, 'rb') as fi, open(x_ungz, 'wb') as fo:
+                #     fo.writelines(fi)
+
+                # if rm:
+                #     os.remove(x)
+            tag = x_ungz
+        else:
+            log.info('expect a gzip file, skip unzip- %s' % x)
+    else:
+        ## compress
+        xgz = x + '.gz'
+        if os.path.exists(xgz):
+            log.info('file exists , skip gzip - %s' % xgz)
+            tag = xgz
+        elif is_gz(x):
+            log.info('file is gzipped, skip gzip - %s' % x)
+            tag = x
+        else:
+            cmd = 'gzip {}'.format(x)
+            run_shell_cmd(cmd)
+            # with open(x, 'rb') as fi, gzip.open(xgz, 'wb') as fo:
+            #     fo.writelines(fi)
+
+            # if rm:
+            #     os.remove(x)
+            tag = xgz
+    return tag
+
+
+def run_shell_cmd(cmd):
+    """This command is from 'ENCODE-DCC/atac-seq-pipeline'
+    https://github.com/ENCODE-DCC/atac-seq-pipeline/blob/master/src/encode_common.py
+    """
+    p = subprocess.Popen(['/bin/bash','-o','pipefail'], # to catch error in pipe
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        preexec_fn=os.setsid) # to make a new process with a new PGID
+    pid = p.pid
+    pgid = os.getpgid(pid)
+    log.info('run_shell_cmd: PID={}, PGID={}, CMD={}'.format(pid, pgid, cmd))
+    stdout, stderr = p.communicate(cmd)
+    rc = p.returncode
+    err_str = 'PID={}, PGID={}, RC={}\nSTDERR={}\nSTDOUT={}'.format(pid, pgid, rc,
+        stderr.strip(), stdout.strip())
+    if rc:
+        # kill all child processes
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except:
+            pass
+        finally:
+            raise Exception(err_str)
+    else:
+        log.info(err_str)
+    return stdout.strip('\n')
 
 
 def findfiles(which, where='.'):
@@ -129,7 +209,7 @@ def args_checker(d, x, update=False):
         with open(x, 'wb') as fo:
             pickle.dump(d, fo, protocol=pickle.HIGHEST_PROTOCOL)
     else:
-        logging.error('illegal x= argument: %s' % x)
+        log.error('illegal x= argument: %s' % x)
 
     return flag
 
@@ -194,7 +274,7 @@ def is_path(path, create = True):
                 os.makedirs(path)
                 return True
             except IOError:
-                logging.error('failed to create directories: %s' % path)
+                log.error('failed to create directories: %s' % path)
         else:
             return False
 
@@ -384,10 +464,10 @@ def rm_file(x):
     """remove files"""
     if isinstance(x, str):
         if os.path.exists(x):
-            logging.info('removing file: %s' % x)
+            log.info('removing file: %s' % x)
             os.remove(x)
         else:
-            logging.info('file does not exists: %s' % x)
+            log.info('file does not exists: %s' % x)
     elif isinstance(x, list):
         tmp = [rm_file(i) for i in x]
 
@@ -430,7 +510,7 @@ def _venv_into(venv, out = False):
         elif sys.version_info[0:1] >=  (3, ):
             exec(open(venv_bin).read(), {}, dict(__file__ = venv_bin)) #python3
         else:
-            logging.error('unknown version of python: ' + sys.version)        
+            log.error('unknown version of python: ' + sys.version)        
     else:
         pass
         #subprocess.run(['deactivate'])
@@ -450,7 +530,7 @@ def venv_checker(venv = '~/envs/py27', into_venv = True):
         elif os.path.exists(venv_in):
             _venv_into(venv_in)
         else:
-            logging.error('virtualenv not exists - ' + venv)
+            log.error('virtualenv not exists - ' + venv)
     else: # exit env
         if is_venv() and venv_in ==  sys.prefix:
             _venv_into(venv_in, out = True)
@@ -494,7 +574,7 @@ def bed_parser(fn, usecols = None):
     if not pathlib.Path(fn).is_file() or os.path.getsize(fn) ==  0:
         df = pd.DataFrame(columns = ['chr', 'start', 'end', 'name', 'score', 
                                      'strand'])
-        logging.warning('empty bed file: %s' % fn)
+        log.warning('empty bed file: %s' % fn)
         return df
     else:
         df = pd.read_table(fn, '\t', usecols = usecols, header = None,
@@ -516,7 +596,7 @@ def bam2bigwig2(bam, path_out, scale=1, binsize=1, overwrite=False):
     c = '%s --bam %s -o %s --scaleFactor %s --binSize %s' % (bamcoverage_exe, 
         bam, bw_out, scale, binsize)
     if os.path.exists(bw_out) and overwrite is False:
-       logging.info('bigWig file exists, %s' % bw_out) 
+       log.info('bigWig file exists, %s' % bw_out) 
     else:
         with open(bw_log, 'wt') as fo:
             subprocess.run(shlex.split(c), stdout=fo, stderr=fo)
@@ -565,7 +645,7 @@ def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False, 
     # prefix = os.path.basename(os.path.splitext(bam)[0])
     prefix = file_prefix(bam)[0]
     bw_log = os.path.join(path_out, prefix + '.deeptools.log')
-    logging.info('create bigWig for: %s' % prefix)
+    log.info('create bigWig for: %s' % prefix)
     if strandness > 0:
         # strandness
         bw_fwd = os.path.join(path_out, prefix + '.fwd.bigWig')
@@ -576,7 +656,7 @@ def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False, 
         
         # file existence
         if os.path.exists(bw_fwd) and os.path.exists(bw_rev) and overwrite is False:
-            logging.info('file exists : %s' % prefix)
+            log.info('file exists : %s' % prefix)
         else:
             # attention; bamCoverage using dUTP-based library
             # reverse, forward
@@ -585,7 +665,7 @@ def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False, 
             c2 = 'bamCoverage -b {} -o {} --binSize {} --filterRNAstrand reverse \
                   --effectiveGenomeSize {}'.format(bam, bw_rev, binsize, gsize)
             if os.path.exists(bw_fwd) and os.path.exists(bw_rev) and not overwrite:
-                logging.info('file exists, bigWig skipped ...')
+                log.info('file exists, bigWig skipped ...')
             else:
                 with open(bw_log, 'wt') as fo:
                     p1 = subprocess.run(shlex.split(c1), stdout=fo, stderr=fo)
@@ -596,12 +676,12 @@ def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False, 
         # strandless
         bw = os.path.join(path_out, prefix + '.bigWig')
         if os.path.exists(bw) and overwrite is False:
-            logging.info('bigWig file exists, skipping: %s' % prefix)
+            log.info('bigWig file exists, skipping: %s' % prefix)
         else:
             c3 = 'bamCoverage -b {} -o {} --binSize {} \
                   --effectiveGenomeSize {}'.format(bam, bw, binsize, gsize)
             if os.path.exists(bw) and not overwrite:
-                logging.info('file exists, bigWig skipped ...')
+                log.info('file exists, bigWig skipped ...')
             else:
                 with open(bw_log, 'wt') as fo:
                     subprocess.run(shlex.split(c3), stdout=fo, stderr=fo)
@@ -642,7 +722,7 @@ def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False, 
 #         c2 = 'bamCoverage -b {} -o {} --binSize {} --filterRNAstrand reverse \
 #               --normalizeTo1x {}'.format(bam, bw_rev, binsize, gsize)
 #         if os.path.exists(bw_fwd) and os.path.exists(bw_rev) and not overwrite:
-#             logging.info('file exists, bigWig skipped ...')
+#             log.info('file exists, bigWig skipped ...')
 #         else:
 #             with open(bw_log, 'wt') as fo:
 #                 subprocess.run(shlex.split(c1), stdout=fo, stderr=fo)
@@ -653,7 +733,7 @@ def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False, 
 #         c3 = 'bamCoverage -b {} -o {} --binSize {} \
 #               --normalizeTo1x {}'.format(bam, bw, binsize, gsize)
 #         if os.path.exists(bw) and not overwrite:
-#             logging.info('file exists, bigWig skipped ...')
+#             log.info('file exists, bigWig skipped ...')
 #         else:
 #             with open(bw_log, 'wt') as fo:
 #                 subprocess.run(shlex.split(c3), stdout=fo, stderr=fo)
@@ -706,7 +786,7 @@ def bam2bw(bam, path_out, scale=1, **args):
 
     prefix = file_prefix(bam)[0]
     bw_log = os.path.join(path_out, prefix + '.deeptools.log')
-    logging.info('create bigWig for: %s' % prefix)
+    log.info('create bigWig for: %s' % prefix)
     
     ## genome
     if gsize is None:
@@ -731,7 +811,7 @@ def bam2bw(bam, path_out, scale=1, **args):
             else:
                 bw_file = os.path.join(path_out, prefix + '.rev.bigWig')
         else:
-            logging.error('argument --filterRNAstrand: invalid choice: (\'forward\', \'reverse\')')
+            log.error('argument --filterRNAstrand: invalid choice: (\'forward\', \'reverse\')')
         opt2 = '--filterRNAstrand ' + str(args['filterRNAstrand'])
 
     ## opt
@@ -742,7 +822,7 @@ def bam2bw(bam, path_out, scale=1, **args):
     
     ## run
     if os.path.exists(bw_file) and not args['overwrite']:
-        logging.info('file exists, skipped: %s' % bam)
+        log.info('file exists, skipped: %s' % bam)
     else:
         bw_log = os.path.splitext(bw_file)[0] + '.log'
         with open(bw_log, 'wt') as fo:
@@ -816,9 +896,9 @@ class Genome(object):
         fa_gz = fa + '.gz'
         if not os.path.exists(fa):
             if os.path.exists(fa_gz):
-                logging.error('require to unzip the fasta file: %s' % fa_gz)
+                log.error('require to unzip the fasta file: %s' % fa_gz)
             else:
-                logging.error('fasta file not detected: %s' % fa)
+                log.error('fasta file not detected: %s' % fa)
             return None
         else:
             return fa
@@ -835,7 +915,7 @@ class Genome(object):
         fa_size = os.path.join(self.genome_path, self.genome, 'bigZips', 
             self.genome + '.chrom.sizes')
         if not os.path.exists(fa_size):
-            logging.info('Downloading chrom.sizes from UCSC')
+            log.info('Downloading chrom.sizes from UCSC')
             url = 'http://hgdownload.cse.ucsc.edu/goldenPath/%s/bigZips/%s.chrom.sizes' % self.genome
             download(url, fa_size)
         return fa_size
@@ -1170,7 +1250,7 @@ class Bed_parser(object):
             return df
         elif os.path.exists(bed):
             if file_row_counter(bed) == 0:
-                logging.error('empty bed file: %s' % bed)
+                log.error('empty bed file: %s' % bed)
             else:
                 df = pd.read_table(bed, '\t', usecols=usecols, header=None) #,
                         # dtype = {'0': np.str, '1': np.int64, '2': np.int64, '3': np.str, '4': np.int64, '5': np.str})

@@ -41,7 +41,6 @@ import sys
 import re
 import shlex
 import subprocess
-import logging
 from utils_parser import *
 from helper import *
 from arguments import args_init
@@ -85,7 +84,7 @@ class Fastx(object):
         is_path(path_out)
         output_exists = False # default
         if os.path.exists(fx_output) and overwrite is False:
-            logging.info('output file exists. try overwrite=True ?')
+            log.info('output file exists. try overwrite=True ?')
             output_exists = True
             sys.exit('update arguments, re-run again...')
 
@@ -130,7 +129,7 @@ class Fastx(object):
         if seqkit_exe is None:
             raise Exception('command not found in $PATH: seqkit')
 
-        logging.info('trimming ends: cut5=%d, cut3=%d, cut_to_length=%d' % (cut_left, cut_right, cut_to_length))
+        log.info('trimming ends: cut5=%d, cut3=%d, cut_to_length=%d' % (cut_left, cut_right, cut_to_length))
 
         ## option-0
         ## filter by length
@@ -230,7 +229,7 @@ class Fastx(object):
         if fastx_collapser is None:
             raise Exception('command not found in $PATH: fastx_collapser')
 
-        logging.info('removing PCR dup')
+        log.info('removing PCR dup')
 
         cmd = fastx_collapser
         if self.fx_type == 'fastq':
@@ -306,11 +305,11 @@ class Fastx(object):
         if seqkit is None:
             raise Exception('command not found in $PATH: seqkit')
 
-        logging.info('extracting sub-sample: n=%d' % n)
+        log.info('extracting sub-sample: n=%d' % n)
 
         ## warning
         if n > 1000000 or p > 0.1:
-            logging.warning('choose a smaller number.')
+            log.warning('choose a smaller number.')
 
         cmd = '%s sample -n %s' % (seqkit, n)
 
@@ -370,7 +369,7 @@ class Cutadapt(object):
     both SE and PE reads
 
     """
-    def __init__(self, fq1, adapter3, path_out=None, len_min=15, **kwargs):
+    def __init__(self, fq1, adapter3, path_out=None, len_min=15, fq2=None, **kwargs):
         """Parsing the parameters for reads trimming
         support both SE and PE reads
         """
@@ -378,6 +377,7 @@ class Cutadapt(object):
         args = args_init(kwargs) # default parameters
         # print(args)
         args['fq1'] = fq1
+        args['fq2'] = fq2
         args['adapter3'] = adapter3
         args['path_out'] = path_out
         args['len_min'] = len_min
@@ -638,22 +638,24 @@ class Cutadapt(object):
         """
         args = self.kwargs.copy()
         fq_prefix, fq_clean, fq_log, fq_untrim, fq_too_short, fq_too_long = self.cutadapt_init()
-        logging.info('trimming SE reads: %s' % fq_prefix)
+        log.info('trimming SE reads: %s' % fq_prefix)
 
-        cmd = self.get_cutadapt_cmd()
-        ## gzip file
         if args['gzip']:
             fq_clean += '.gz'
+
         ## run program
+        cmd = self.get_cutadapt_cmd()
         if os.path.exists(fq_clean) and args['overwrite'] is False:
-            logging.info('file exists, cutadapt skipped: %s' % fq_prefix)
+            log.info('file exists, cutadapt skipped: %s' % fq_prefix)
         else:
-            with xopen(fq_clean, 'wb') as fo, open(fq_log, 'wt') as flog:
-                p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=flog)
-                for line in p.stdout:
-                    fo.write(line)
-                p.communicate()
+            if args['gzip']:
+                cmd += ' 2> {} | gzip -nc > {}'
+            else:
+                cmd += ' 2> {} 1> {}'
+            cmd = cmd.format(fq_log, fq_clean)
+            run_shell_cmd(cmd)
             Cutadapt_log(fq_log).saveas()
+
         return fq_clean
 
 
@@ -664,7 +666,7 @@ class Cutadapt(object):
         """
         args = self.kwargs.copy()
         fq1_prefix, fq1_clean, fq2_clean, fq1_log = self.cutadapt_init()[:4]
-        logging.info('trimming PE reads: %s' % fq1_prefix)
+        log.info('trimming PE reads: %s' % fq1_prefix)
 
         cmd = self.get_cutadapt_cmd()
         ## check exists
@@ -675,11 +677,14 @@ class Cutadapt(object):
             fq2_check += '.gz'
         ## compress fastq file after cutadapt
         if os.path.exists(fq1_check) and os.path.exists(fq2_check) and args['overwrite'] is False:
-            logging.info('file exists, cutadapt skipped: %s' % fq1_prefix)
+            log.info('file exists, cutadapt skipped: %s' % fq1_prefix)
         else:
-            with open(fq1_log, 'wt') as fo:
-                p1 = subprocess.run(shlex.split(cmd), stdout=fo, stderr=fo)
-                # Cutadapt_log(fq_log).saveas()
+            cmd += ' 1> {}'.format(fq1_log)
+            run_shell_cmd(cmd)
+            if args['gzip']:
+                fq1_clean = gzip_file2(fq1_clean, rm=True)
+                fq2_clean = gzip_file2(fq2_clean, rm=True)
+            # Cutadapt_log(fq_log).saveas()
         return [fq1_clean, fq2_clean]
 
 
@@ -694,44 +699,21 @@ class Cutadapt(object):
         args_file = os.path.join(args['path_out'], fq_prefix + '.arguments.txt')
         args_pickle = os.path.join(args['path_out'], fq_prefix + '.arguments.pickle')
         if args_checker(args, args_pickle) and args['overwrite'] is False:
-            logging.info('arguments not changed, trimming skipped - %s' % fq_prefix)
-            ## SE mode
-            if args['fq2'] is None:
-                return_fq = fq1_clean
-                if args['gzip']:
-                    return_fq += '.gz'
-            ## PE mode
-            else:
-                fq2_clean = args_init[2]
-                return_fq = [fq1_clean, fq2_clean]
-                if args['gzip']:
-                    return_fq = [fq1_clean + '.gz', fq2_clean + '.gz']
+            log.info('arguments not changed, trimming skipped - %s' % fq_prefix)
+        
+        if args['fq2'] is None:
+            return_fq = self.trim_se() # fq1
+            fq1_clean = return_fq
         else:
-            ## run program
-            args_logger(args, args_file, overwrite=True) # update arguments.txt
-            ## SE mode
-            if args['fq2'] is None:
-                fq1_clean = self.trim_se() # fq1
-                return_fq = fq1_clean
-                ## write to gzip file using gzip.open()
-                # ## gzip compress files
-                # if args['gzip']:
-                #     fq1_clean = gzip_file(return_fq, rm=True)
-                #     return_fq = fq1_clean
-            else:
-                return_fq = self.trim_pe() # fq1, fq2
-                ## gzip compress files
-                if args['gzip']:
-                    fq1_clean = gzip_file(return_fq[0], rm=True)
-                    fq2_clean = gzip_file(return_fq[1], rm=True)
-                    return_fq = [fq1_clean, fq2_clean]
+            return_fq = self.trim_pe() # fq1 fq2
+            fq1_clean = return_fq[0]
 
-            ## save read count
-            fq_count_file = os.path.join(args['path_out'], fq_prefix + '.clean_reads.txt')
-            if not os.path.exists(fq_count_file) or args['overwrite'] is True:
-                fq_count = int(file_row_counter(fq1_clean) / 4)
-                with open(fq_count_file, 'wt') as fo:
-                    fo.write(str(fq_count) + '\n')
+        ## save read count
+        fq_count_file = os.path.join(args['path_out'], fq_prefix + '.clean_reads.txt')
+        if not os.path.exists(fq_count_file) or args['overwrite'] is True:
+            fq_count = int(file_row_counter(fq1_clean) / 4)
+            with open(fq_count_file, 'wt') as fo:
+                fo.write(str(fq_count) + '\n')
 
         return return_fq
 
@@ -825,7 +807,7 @@ class Trimmer(object):
         return return_code
 
 
-    def trimmer(self):
+    def trim_se(self):
         """Define the processing steps
         a. trim adapter
         b. cut N bases
@@ -847,7 +829,7 @@ class Trimmer(object):
         args_file = os.path.join(args['path_out'], fq1_prefix + '.arguments.txt')
         args_pickle = os.path.join(args['path_out'], fq1_prefix + '.arguments.pickle')
         if args_checker(args, args_pickle) and os.path.exists(return_output) and args['overwrite'] is False:
-            logging.info('file exists, arguments not changed, trimming skipped : %s' % fq1_prefix)
+            log.info('file exists, arguments not changed, trimming skipped : %s' % fq1_prefix)
             return return_output
         else:
             args_logger(args, args_file, True) # update arguments.txt
@@ -925,7 +907,7 @@ class Trimmer(object):
 
         ## remove temp files
         if not args['keep_temp_files']:
-            logging.info('[remving temp files]')
+            log.info('[remving temp files]')
             rm_file([return_trim, return_cut1, return_rmdup, return_cut2, return_cut3])
 
         ## 6. summarise
@@ -946,5 +928,150 @@ class Trimmer(object):
             fo.write('%13s : %10d : %6.2f%%\n' % ('output', count_cut3, count_cut3 / count_input * 100))
 
         ## return
+        return return_output
+
+
+    def trim_pe(self):
+        """Define the processing steps
+        a. trim adapter
+        b. cut N bases
+        c. collapse
+        d. cut N bases
+        e. cut to length
+        """
+        args = self.kwargs.copy()
+
+        ## output file 
+        fq1_prefix = file_prefix(args['fq1'])[0]
+        fq2_prefix = file_prefix(args['fq2'])[0]
+        fx_type = seq_type(args['fq1'])
+        return_output_name1 = fq1_prefix + '.' + fx_type
+        return_output_name2 = fq2_prefix + '.' + fx_type
+        if args['gzip']:
+            return_output_name1 += '.gz'
+            return_output_name2 += '.gz'
+
+        # return_output = [os.path.join(args['path_out'], i) for i in return_output_name]
+        return_output = [
+            os.path.join(args['path_out'], return_output_name1),
+            os.path.join(args['path_out'], return_output_name2)]
+
+        ## save arguments
+        args_file = os.path.join(args['path_out'], fq1_prefix + '.arguments.txt')
+        args_pickle = os.path.join(args['path_out'], fq1_prefix + '.arguments.pickle')
+        if args_checker(args, args_pickle) and os.path.exists(return_output) and args['overwrite'] is False:
+            log.info('file exists, arguments not changed, trimming skipped : %s' % fq1_prefix)
+            return return_output
+        else:
+            args_logger(args, args_file, True) # update arguments.txt
+
+        ## update arguments for Cutadapt
+        path_out = args.pop('path_out')
+        fq1 = args.pop('fq1')
+        fq2 = args.pop('fq2')
+        adapter3 = args.pop('adapter3')
+        len_min = args.pop('len_min')
+        ## ignore cut-to-length
+        cut_to_length = args.pop('cut_to_length') # save for further analysis
+        args['cut_to_length'] = 0 # update
+
+        ## 0. input file
+        count_input = fx_counter(fq1)
+
+        ## 1. trim adapter
+        path_cutadapt = os.path.join(path_out, '1_trim_adapter')
+        if args['not_trim_adapter']:
+            return_trim = [fq1, fq2]
+            count_trim = count_input
+        else:
+            return_trim = Cutadapt(fq1, adapter3, path_cutadapt, len_min, fq2=fq2, **args).run()
+            count_trim = fx_counter(return_trim[0])
+
+        ## 2. cut N bases
+        path_cut1 = os.path.join(path_out, '2_cut')
+        return_cut1 = [os.path.join(path_cut1, os.path.basename(i)) for i in return_trim]
+        if args['cut_after_trim'] == '0' or is_empty_file(return_trim[0]):
+            return_cut1 = return_trim
+            count_cut1 = count_trim
+        else:
+            cut5, cut3 = self.cut_parser(args['cut_after_trim'])
+            [Fastx(i, path_cut1, **args).cut(cut_left=cut5, 
+                cut_right=cut3, len_min=len_min) for i in return_trim]
+            count_cut1 = fx_counter(return_cut1[0])
+
+        ## 3. collapse
+        path_rmdup = os.path.join(path_out, '3_rmdup')
+        return_rmdup = [os.path.join(path_rmdup, os.path.basename(i)) for i in return_cut1]
+        if not args['rmdup'] or is_empty_file(return_cut1[0]):
+            return_rmdup = return_cut1
+            count_rmdup = count_cut1
+        else:
+            [Fastx(i, path_rmdup, **args).rmdup() for i in return_cut1]
+            count_rmdup = fx_counter(return_rmdup[0])
+
+        ## 4. cut Nbases
+        path_cut2 = os.path.join(path_out, '4_cut')
+        return_cut2 = [os.path.join(path_cut2, os.path.basename(i)) for i in return_rmdup]
+        if args['cut_after_rmdup'] == '0' or is_empty_file(return_rmdup[0]):
+            return_cut2 = return_rmdup
+            count_cut2 = count_rmdup
+        else:
+            cut5, cut3 = self.cut_parser(args['cut_after_rmdup'])
+            [Fastx(i, path_cut2, **args).cut(cut_left=cut5, 
+                cut_right=cut3, len_min=len_min) for i in return_rmdup]
+            count_cut2 = fx_counter(return_cut2[0])
+
+        ## 5. cut to length
+        path_cut3 = os.path.join(path_out, '5_cut_to_length')
+        return_cut3 = [os.path.join(path_cut3, os.path.basename(i)) for i in return_cut2]
+        if cut_to_length < len_min or is_empty_file(return_cut2[0]):
+            return_cut3 = return_cut2
+            count_cut3 = count_cut2
+        else:
+            [Fastx(i, path_cut3, **args).cut(cut_to_length=cut_to_length,
+                len_min=len_min) for i in return_cut2]
+            count_cut3 = fx_counter(return_cut3)
+        
+        ## 6. organize output
+        ## save results
+        os.rename(return_cut3[0], return_output[0])
+        os.rename(return_cut3[1], return_output[1])
+
+        ## remove temp files
+        if not args['keep_temp_files']:
+            log.info('[remving temp files]')
+            rm_file(return_trim + return_cut1 + return_rmdup + return_cut2 + return_cut3)
+
+        ## 6. summarise
+        trim_stat_file = os.path.join(path_out, fq1_prefix + '.trim.stat')
+        n_trim = count_input - count_trim
+        n_cut1 = count_trim - count_cut1
+        n_dup = count_cut1 - count_rmdup
+        n_cut2 = count_rmdup - count_cut2
+        n_cut3 = count_cut2 - count_cut3
+
+        with open(trim_stat_file, 'wt') as fo:
+            fo.write('%13s : %10d : %6.2f%%\n' % ('input', count_input, 100))
+            fo.write('%13s : %10d : %6.2f%%\n' % ('trim', n_trim, n_trim / count_input * 100))
+            fo.write('%13s : %10d : %6.2f%%\n' % ('cut_end1', n_cut1, n_cut1 / count_input * 100))
+            fo.write('%13s : %10d : %6.2f%%\n' % ('duplicate', n_dup, n_dup / count_input * 100))
+            fo.write('%13s : %10d : %6.2f%%\n' % ('cut_end2', n_cut2, n_cut2 / count_input * 100))
+            fo.write('%13s : %10d : %6.2f%%\n' % ('cut_to_length', n_cut3, n_cut3 / count_input * 100))
+            fo.write('%13s : %10d : %6.2f%%\n' % ('output', count_cut3, count_cut3 / count_input * 100))
+
+        ## return
+        return return_output
+
+
+    def trimmer(self):
+        """Choose se or pe"""
+        args = self.kwargs.copy()
+
+        ## SE
+        if args['fq2'] is None:
+            return_output = self.trim_se()
+        else:
+            return_output = self.trim_pe()
+
         return return_output
 
