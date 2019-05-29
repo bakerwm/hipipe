@@ -40,13 +40,14 @@ class Alignment(object):
     :args repeat_masked_genome
     :args genome_path
     """
-    def __init__(self, fq1, path_out, aligner, smp_name=None, 
+    def __init__(self, fq1, path_out, aligner, smp_name=None, fq2=None,
         genome=None, align_by_order=True, **kwargs):
         """Mulitple index"""
         args = args_init(kwargs, align=True)
 
         ## update arguments
         args['fq1'] = fq1
+        args['fq2'] = fq2
         # args['path_out'] = path_out
         args['aligner'] = aligner
         args['smp_name'] = smp_name
@@ -56,11 +57,12 @@ class Alignment(object):
         ## create index
         args['index_list'] = AlignIndexBuilder(**args).get_index()
         self.fq1 = fq1
+        self.fq2 = fq2
         self.path_out = path_out # original path_out
         self.args = args
 
 
-    def run(self):
+    def align_se(self):
         args = self.args.copy()
 
         ## check arguments
@@ -68,7 +70,7 @@ class Alignment(object):
         args_file = os.path.join(self.path_out, 'arguments.txt')
         args_pickle = os.path.join(self.path_out, 'arguments.pickle')
         if args_checker(args, args_pickle) and args['overwrite'] is False:
-            logging.info('arguments not changed, alignment skipped')
+            log.info('arguments not changed, alignment skipped')
             args['dry_run'] = True
         else:
             args_logger(args, args_file, overwrite=True) # update arguments.txt
@@ -82,7 +84,7 @@ class Alignment(object):
                 fq_prefix = re.sub('.map_\w+', '', fq_prefix)
 
             fq_path_out = os.path.join(self.path_out, fq_prefix)
-            logging.info('fq_file: %s' % fq_prefix) # !!!! logging
+            log.info('fq_file: %s' % fq_prefix) # !!!! logging
             ## update arguments
             args['fq1'] = fq_in
             args['path_out'] = fq_path_out
@@ -92,6 +94,50 @@ class Alignment(object):
             align_stat = AlignSummarize(path_out=fq_path_out).run()
             # print(fq_path_out)
             # print(align_stat)
+
+
+    def align_pe(self):
+        args = self.args.copy()
+
+        ## check arguments
+        assert is_path(self.path_out)
+        args_file = os.path.join(self.path_out, 'arguments.txt')
+        args_pickle = os.path.join(self.path_out, 'arguments.pickle')
+        if args_checker(args, args_pickle) and args['overwrite'] is False:
+            log.info('arguments not changed, alignment skipped')
+            args['dry_run'] = True
+        else:
+            args_logger(args, args_file, overwrite=True) # update arguments.txt
+
+        map_files = []
+        # for fq_in in self.fq1:
+        for fq1, fq2 in zip(self.fq1, self.fq2):
+            fq_prefix = file_prefix(fq1)[0]
+            fq_prefix = re.sub('\.clean|\.nodup|\.cut', '', fq_prefix)
+            if args['simple_name']:
+                fq_prefix = re.sub('.not_\w+', '', fq_prefix)
+                fq_prefix = re.sub('.map_\w+', '', fq_prefix)
+
+            fq_path_out = os.path.join(self.path_out, fq_prefix)
+            log.info('fq_file: %s' % fq_prefix) # !!!! logging
+            ## update arguments
+            args['fq1'] = fq1
+            args['fq2'] = fq2
+            args['path_out'] = fq_path_out
+            bam_files = AlignHub(**args).run()
+            map_files.append(bam_files)
+            ## summarize alignment log
+            align_stat = AlignSummarize(path_out=fq_path_out).run()
+            # print(fq_path_out)
+            # print(align_stat)
+
+        return map_files
+
+    def run(self):
+        if self.fq2 is None:
+            map_files = self.align_se()
+        else:
+            map_files = self.align_pe()
 
         return map_files
 
@@ -352,7 +398,7 @@ class AlignNode(object):
     support SE mode
     (to-do: PE mode)
     """
-    def __init__(self, fq1, path_out, aligner, index, smp_name=None, **kwargs):
+    def __init__(self, fq1, path_out, aligner, index, fq2=None, smp_name=None, **kwargs):
         """Parse arguments
         fq1 fastq file or a list of files
         required arguments: fqs, path_out, smp_name, genome, genome, spikein,
@@ -369,17 +415,31 @@ class AlignNode(object):
         args['aligner'] = aligner
         args['index'] = index
         args['smp_name'] = smp_name
+        args['fq2'] = fq2
 
         ## check index 
         assert AlignIndex(**args).get_index()
 
         ## check aligner
         aligner_dict = {
-            'bowtie': self.bowtie_se,
-            'bowtie2': self.bowtie2_se,
-            'STAR': self.star_se}
-       
-        aligner_exe = aligner_dict.get(aligner, None)
+            'se' : {
+                'bowtie': self.bowtie_se,
+                'bowtie2': self.bowtie2_se,
+                'STAR': self.star_se
+            },
+            'pe' : {
+                'bowtie': self.bowtie_pe,
+                'bowtie2': self.bowtie2_pe,
+                'STAR': self.star_pe
+            }
+        }
+
+        ## se-pe
+        paired = 'pe' if fq2 else 'se'
+        paired_dict = aligner_dict[paired]
+
+        ## aligner
+        aligner_exe = paired_dict.get(aligner, None)
         if not aligner_exe:
             raise Exception('unknown aligner: %s' % aligner)
         self.aligner_exe = aligner_exe
@@ -424,6 +484,12 @@ class AlignNode(object):
         map_bam = map_prefix + '.bam'
         map_log = map_prefix + '.log'
         unmap_file = unmap_prefix + '.' + fq_type
+
+        ## paired end 
+        if args['fq2']:
+            unmap_file = [
+                unmap_prefix + '.1.' + fq_type, 
+                unmap_prefix + '.2.' + fq_type]
         return [fq_prefix, map_bam, map_log, unmap_file]
 
 
@@ -466,7 +532,7 @@ class AlignNode(object):
 
         # run
         if os.path.exists(map_bam) and args['overwrite'] is False:
-            logging.info('bam file exists: %s' % map_bam)
+            log.info('bam file exists: %s' % map_bam)
         else:
             c1 = '%s %s %s -p %s --mm --best --sam --no-unal --un %s %s \
                 %s' % (bowtie_exe, para_fq, para_unique, args['threads'], 
@@ -529,7 +595,7 @@ class AlignNode(object):
 
         # file exists
         if os.path.exists(map_bam) and args['overwrite'] is False:
-            logging.info('bam file exists: %s' % map_bam)
+            log.info('bam file exists: %s' % map_bam)
         else:
             c1 = '%s %s -p %s --very-sensitive-local --mm --no-unal --un %s -x %s -U %s' % (bowtie2_exe, 
                 para_fq, args['threads'], unmap_fq, args['index'], args['fq1'])
@@ -588,7 +654,7 @@ class AlignNode(object):
         # file exists
         map_prefix = os.path.splitext(map_bam)[0]
         if os.path.exists(map_bam) and args['overwrite'] is False:
-            logging.info('bam file exists: %s' % map_bam)
+            log.info('bam file exists: %s' % map_bam)
         else:
             c1 = 'STAR --runMode alignReads \
               --genomeDir %s \
@@ -619,6 +685,89 @@ class AlignNode(object):
         # process log file
         self.wrap_log(map_log)
         return [map_bam, unmap_fq]
+
+
+    def bowtie_pe(self):
+        pass
+
+
+    def bowtie2_pe(self):
+        """run bowtie2 for PE reads
+        args: fq, the fastq file
+        args: fq2, the mate of paired end reads
+        args: index, the path to the aligner index
+        args: reference, the name of the index, keys of index_init
+        args: unique_map, boolen
+        args: align_path, None or str
+
+        # unique mapping 
+        samtools view -q 10 
+
+        # arguments
+        reference: genome, genome_rRNA, spikein, spikein_rRNA
+        """
+        args = self.args.copy()
+        bowtie2_exe = which('bowtie2')
+
+        # output directory
+        fq_prefix, map_bam, map_log, unmap_fq = self.align_init()
+
+        # determine parameters
+        if args['unique_only']:
+            para_unique = '-q 10'
+        else:
+            para_unique = '-q 0'
+        
+        # multi map
+        n_map = args['n_map']
+        if n_map == 0:
+            # n_map = 1 # default 1, report 1 hit for each read
+            # default: #look for multiple alignments, report best, with MAPQ
+            para_fq = ''
+        else:
+            para_fq = '-k %s' % n_map
+
+        # fq type
+        if seq_type(args['fq1']) == 'fasta':
+            para_fq = para_fq + ' -f'
+        else:
+            para_fq = para_fq + ' -q'
+
+        # unmap file prefix
+        unmap_list = unmap_fq[0].split('.')
+        del unmap_list[-2]
+        unmap_prefix = '.'.join(unmap_list)
+
+        # file exists
+        if os.path.exists(map_bam) and args['overwrite'] is False:
+            log.info('bam file exists: %s' % map_bam)
+        else:
+            cmd = '{} {} -p {} --very-sensitive-local --mm '
+            cmd += '--un-conc {} -x {} -1 {} -2 {} 2> {} | '
+            cmd += 'samtools view -Su -f 0x2 -@ {} {} - | '
+            cmd += 'samtools sort -@ {} -o {} -'
+            cmd = cmd.format(
+                bowtie2_exe, 
+                para_fq, 
+                args['threads'], 
+                unmap_prefix, 
+                args['index'], 
+                args['fq1'],
+                args['fq2'],
+                map_log,
+                args['threads'],
+                para_unique,
+                args['threads'],
+                map_bam)
+            run_shell_cmd(cmd)
+
+        # process log file
+        self.wrap_log(map_log)
+        return [map_bam, unmap_fq]
+
+
+    def star_pe(self):
+        pass
 
 
     def get_prefix(self):
@@ -659,13 +808,11 @@ class AlignNode(object):
         """
         args = self.args.copy()
         index_name = AlignIndex(**args).get_index_name()
-        logging.info('index: %s' % args['index']) # !!!! logging
-        logging.info('index_name: %s' % index_name) # !!!! logging
+        log.info('index: %s' % args['index']) # !!!! logging
+        log.info('index_name: %s' % index_name) # !!!! logging
 
         aligner_exe = self.aligner_exe
         map_bam, unmap_file = aligner_exe()
-
-        # sort bam
 
         # index bam
         BAM(map_bam).index()
@@ -678,17 +825,18 @@ class AlignHub(object):
     1 fastq
     N index (sequential)
     """
-    def __init__(self, fq1, path_out, aligner, index_list,
+    def __init__(self, fq1, path_out, aligner, index_list, fq2=None,
         smp_name=None, align_by_order=True, dry_run=False, **kwargs):
         """Mulitple indexes"""
         assert isinstance(index_list, list)
         args = args_init(kwargs, align=True)
 
-        ## udpate arguments
+        ## update arguments
         args['fq1'] = fq1
         args['path_out'] = path_out
         args['aligner'] = aligner
         args['smp_name'] = smp_name
+        args['fq2'] = fq2
 
         self.index_list = index_list
         self.align_by_order = align_by_order
@@ -740,9 +888,57 @@ class AlignHub(object):
         return map_files
 
 
+    def align_pe_batch(self):
+        """Alignment 2 fastq files to multiple index
+        priority:
+        extra_index > genome
+        """
+        args = self.args.copy()
+
+        ## output
+        map_files = []
+        for x in self.index_list:
+            if x is None:
+                continue
+            args['index'] = x
+
+            # index order
+            x_order = self.index_list.index(x) + 1
+
+            # check exists
+            x_bam = AlignNode(**args).get_bam()
+            x_unmap = AlignNode(**args).get_unmap()
+
+            # suppress --unique-only for rRNA mapping
+            index_name = AlignIndex(**args).get_index_name()
+            unique_old = args['unique_only']
+            if index_name.endswith('rRNA'):
+                args['unique_only'] = False
+
+            if self.dry_run: # do not run alignment
+                pass
+            else:
+                if not os.path.exists(x_bam) or not os.path.exists(x_unmap) or args['overwrite']:
+                    x_bam, x_unmap = AlignNode(**args).run()
+
+            ## update arguments
+            if self.align_by_order:
+                args['fq1'] = x_unmap[0]
+                args['fq2'] = x_unmap[1]
+            args['unique_only'] = unique_old # update
+
+            ## save bam files
+            map_files.append(x_bam)
+
+        return map_files
+
+
     def run(self):
         """run alignment"""
-        map_files = self.align_se_batch()
+        if self.args['fq2']:
+            map_files = self.align_pe_batch()
+        else:
+            map_files = self.align_se_batch()
 
         return map_files
 
@@ -839,7 +1035,7 @@ class AlignReader(object):
             return True
         else:
             index_num = [str(i) for i in index_num]
-            logging.error('failed, BAM files for each sample: ' + ' '.join(index_num))
+            log.error('failed, BAM files for each sample: ' + ' '.join(index_num))
             return False
 
 
@@ -892,7 +1088,7 @@ class AlignReader(object):
             tag = x
         else:
             tag = None
-            logging.error('index number not consistent between samples')
+            log.error('index number not consistent between samples')
 
         # return 
         return tag
@@ -1011,7 +1207,7 @@ class AlignSummarize(object):
             flag = re.sub(r'.map_', '', x_ext)
         else:
             flag = None
-            logging.warning('not a alignment directory: %s' % x)
+            log.warning('not a alignment directory: %s' % x)
 
         return flag
 
@@ -1154,68 +1350,6 @@ class AlignSummarize(object):
 class Alignment_log(object):
     """Wrapper log file of aligner, bowtie, bowtie2, STAR
     report: total reads, unique mapped reads, multiple mapped reads
-
-    Bowtie2:
-
-    10000 reads; of these:
-      10000 (100.00%) were unpaired; of these:
-        166 (1.66%) aligned 0 times
-        2815 (28.15%) aligned exactly 1 time
-        7019 (70.19%) aligned >1 times
-    98.34% overall alignment rate
-
-
-    Bowtie:
-
-    # reads processed: 10000
-    # reads with at least one reported alignment: 3332 (33.32%)
-    # reads that failed to align: 457 (4.57%)
-    # reads with alignments suppressed due to -m: 6211 (62.11%)
-
-    or:
-
-    # reads processed: 10000
-    # reads with at least one reported alignment: 9543 (95.43%)
-    # reads that failed to align: 457 (4.57%)
-
-
-    STAR:
-    *final.Log.out
-
-                                 Started job on |       Sep 12 11:08:57
-                             Started mapping on |       Sep 12 11:11:27
-                                    Finished on |       Sep 12 11:11:29
-       Mapping speed, Million of reads per hour |       18.00
-
-                          Number of input reads |       10000
-                      Average input read length |       73
-                                    UNIQUE READS:
-                   Uniquely mapped reads number |       47
-                        Uniquely mapped reads % |       0.47%
-                          Average mapped length |       51.66
-                       Number of splices: Total |       5
-            Number of splices: Annotated (sjdb) |       0
-                       Number of splices: GT/AG |       3
-                       Number of splices: GC/AG |       0
-                       Number of splices: AT/AC |       0
-               Number of splices: Non-canonical |       2
-                      Mismatch rate per base, % |       2.14%
-                         Deletion rate per base |       0.04%
-                        Deletion average length |       1.00
-                        Insertion rate per base |       0.00%
-                       Insertion average length |       0.00
-                             MULTI-MAPPING READS:
-        Number of reads mapped to multiple loci |       83
-             % of reads mapped to multiple loci |       0.83%
-        Number of reads mapped to too many loci |       19
-             % of reads mapped to too many loci |       0.19%
-                                  UNMAPPED READS:
-       % of reads unmapped: too many mismatches |       0.02%
-                 % of reads unmapped: too short |       98.31%
-                     % of reads unmapped: other |       0.18%
-                                  CHIMERIC READS:
-                       Number of chimeric reads |       0
-                            % of chimeric reads |       0.00%
     """
 
     def __init__(self, log, unique_only=False):
@@ -1268,6 +1402,20 @@ class Alignment_log(object):
 
     def _bowtie_parser(self):
         """Wrapper bowtie log
+
+        Bowtie:
+
+        # reads processed: 10000
+        # reads with at least one reported alignment: 3332 (33.32%)
+        # reads that failed to align: 457 (4.57%)
+        # reads with alignments suppressed due to -m: 6211 (62.11%)
+
+        or:
+
+        # reads processed: 10000
+        # reads with at least one reported alignment: 9543 (95.43%)
+        # reads that failed to align: 457 (4.57%)
+
         unique, multiple, unmap, map, total
         """
         dd = {}
@@ -1300,24 +1448,73 @@ class Alignment_log(object):
 
 
     def _bowtie2_parser(self):
-        """Wrapper bowtie2 log"""
+        """Wrapper bowtie2 log
+        Bowtie2:
+
+        SE:
+
+        10000 reads; of these:
+          10000 (100.00%) were unpaired; of these:
+            166 (1.66%) aligned 0 times
+            2815 (28.15%) aligned exactly 1 time
+            7019 (70.19%) aligned >1 times
+        98.34% overall alignment rate
+
+        PE:
+
+        100000 reads; of these:
+          100000 (100.00%) were paired; of these:
+            92926 (92.93%) aligned concordantly 0 times
+            5893 (5.89%) aligned concordantly exactly 1 time
+            1181 (1.18%) aligned concordantly >1 times
+            ----
+            92926 pairs aligned concordantly 0 times; of these:
+              1087 (1.17%) aligned discordantly 1 time
+            ----
+            91839 pairs aligned 0 times concordantly or discordantly; of these:
+              183678 mates make up the pairs; of these:
+                183215 (99.75%) aligned 0 times
+                101 (0.05%) aligned exactly 1 time
+                362 (0.20%) aligned >1 times
+        8.39% overall alignment rate
+
+        """
         dd = {}
+        se_tag = 1 #
         with open(self.log, 'rt') as ff:
             for line in ff:
                 value = line.strip().split(' ')[0]
                 if '%' in value:
                     continue
+                if line.strip().startswith('----'):
+                    continue
                 value = int(value)
-                if 'reads; of these' in line:
+
+                ## paired tag
+                if 'were paired; of these' in line:
                     dd['total'] = value
-                elif 'aligned 0 times' in line:
+                    se_tag = 0
+                elif 'aligned concordantly 0 times' in line:
                     dd['unmap'] = value
-                elif 'aligned exactly 1 time' in line:
+                    se_tag = 0
+                elif 'aligned concordantly exactly 1 time' in line:
                     dd['unique'] = value
-                elif 'aligned >1 times' in line:
+                    se_tag = 0
+                elif 'aligned concordantly >1 times' in line:
+                    dd['multiple'] = value
+                    se_tag = 0
+                elif 'reads; of these' in line and se_tag:
+                    dd['total'] = value
+                elif 'aligned 0 times' in line and se_tag:
+                    dd['unmap'] = value
+                elif 'aligned exactly 1 time' in line and se_tag:
+                    dd['unique'] = value
+                elif 'aligned >1 times' in line and se_tag:
                     dd['multiple'] = value
                 else:
                     pass
+
+
         if self.unique_only:
             dd['map'] = dd['unique']
         else:
@@ -1327,7 +1524,46 @@ class Alignment_log(object):
 
 
     def _star_parser(self):
-        """Wrapper STAR *final.log"""
+        """Wrapper STAR *final.log
+        
+        STAR:
+        *final.Log.out
+
+                                     Started job on |       Sep 12 11:08:57
+                                 Started mapping on |       Sep 12 11:11:27
+                                        Finished on |       Sep 12 11:11:29
+           Mapping speed, Million of reads per hour |       18.00
+
+                              Number of input reads |       10000
+                          Average input read length |       73
+                                        UNIQUE READS:
+                       Uniquely mapped reads number |       47
+                            Uniquely mapped reads % |       0.47%
+                              Average mapped length |       51.66
+                           Number of splices: Total |       5
+                Number of splices: Annotated (sjdb) |       0
+                           Number of splices: GT/AG |       3
+                           Number of splices: GC/AG |       0
+                           Number of splices: AT/AC |       0
+                   Number of splices: Non-canonical |       2
+                          Mismatch rate per base, % |       2.14%
+                             Deletion rate per base |       0.04%
+                            Deletion average length |       1.00
+                            Insertion rate per base |       0.00%
+                           Insertion average length |       0.00
+                                 MULTI-MAPPING READS:
+            Number of reads mapped to multiple loci |       83
+                 % of reads mapped to multiple loci |       0.83%
+            Number of reads mapped to too many loci |       19
+                 % of reads mapped to too many loci |       0.19%
+                                      UNMAPPED READS:
+           % of reads unmapped: too many mismatches |       0.02%
+                     % of reads unmapped: too short |       98.31%
+                         % of reads unmapped: other |       0.18%
+                                      CHIMERIC READS:
+                           Number of chimeric reads |       0
+                                % of chimeric reads |       0.00%
+        """
         dd = {}
         with open(self.log, 'rt') as ff:
             for line in ff:
@@ -1571,7 +1807,7 @@ class Alignment_stat(object):
                 index=[merge_path_name])
             return df_merge
         else:
-            logging.error('%10s | not contain merged mapping files: %s' % ('failed', self.path))
+            log.error('%10s | not contain merged mapping files: %s' % ('failed', self.path))
             return None
 
 

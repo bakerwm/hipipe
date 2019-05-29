@@ -21,7 +21,7 @@ import argparse
 from arguments import args_init
 from alignment import Alignment, Alignment_log, Alignment_stat
 from hipipe_reporter import Alignment_reporter
-
+from helper import *
 
 def get_args():
     """
@@ -31,11 +31,14 @@ def get_args():
     parser = argparse.ArgumentParser(prog='aligner', 
                                      description='mapping reads')
     parser.add_argument('-i', '--fq1', nargs='+', required=True,
-        help='CLIP reads in FASTQ format, (not *.gz), 1-4 files.')
-    parser.add_argument('-o', '--path_out', default=None, 
+        help='Reads in FASTQ format, 1-4 files.')
+    parser.add_argument('-I', '--fq2', nargs='+', required=False,
+        default=None,
+        help='The second mate of paired end reads in fastq format.')
+    parser.add_argument('-o', '--path-out', default=None, dest='path_out',
         help='The directory to save results, default, \
         current working directory.')
-    parser.add_argument('-n', '--smp_name', required=False,
+    parser.add_argument('-n', '--smp-name', dest='smp_name',
         help='Name of the experiment')
     parser.add_argument('-g', '--genome', required=True, default='hg19', 
         choices=['dm3', 'hg19', 'hg38', 'mm10', 'mm9'],
@@ -81,18 +84,29 @@ def get_args():
     parser.add_argument('--simple-name', dest='simple_name', 
         action='store_true',
         help='use simple name for fastq prefix, remove .not_..., .map_to..., ')
+    parser.add_argument('--log-level', default='INFO', dest='log_level',
+                        choices=['NOTSET','DEBUG','INFO',
+                            'WARNING','CRITICAL','ERROR','CRITICAL'],
+                        help='Log level')
     args = parser.parse_args()
+
+    log.setLevel(args.log_level)
+    log.info(sys.argv)
+
     return args
 
 
 def main():
     args = args_init(vars(get_args()), align=True) # save as dictionary
 
-    
+    log.info('aaaaa')
+
     # args['align_to_te'] = True
 
     ## run alignment
     map_bam_list = Alignment(**args).run()
+
+    logging.info('aaaaaa')
 
     # # specific arguments
     # args['align_to_rRNA'] = True # force mapping to rRNA
