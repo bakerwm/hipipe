@@ -55,8 +55,8 @@ class OSS(object):
         Data_text:
         AccessKeyId: **********
         AccessKeySecret: **********
-        预设OSS路径: oss://pangoo-bj/customer-*********/
-        区域: 华北2(北京) oss-cn-beijing.aliyuncs.com
+        oss://pangoo-bj/customer-*********/
+        oss-cn-beijing.aliyuncs.com
 
         arguments:
         ki: AccessKeyId

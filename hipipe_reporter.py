@@ -110,7 +110,7 @@ class QC_reporter(object):
         
         # run fastqc
         fq_list = ' '.join(fq_files)
-        cmd1 = 'fastqc -o %s %s' % (self.output, fq_list)
+        cmd1 = 'fastqc -t 8 -o %s %s' % (self.output, fq_list)
         if len(fq_files) > 0:
             self.run_shell_cmd(cmd1)
 
