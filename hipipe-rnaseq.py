@@ -91,12 +91,10 @@ de_analysis (A vs B)
 
 import os
 import sys
-import pathlib
 import argparse
 import collections
 import shlex
 import subprocess
-import pysam
 from arguments import args_init
 from helper import *
 from alignment import Alignment, Alignment_log, Alignment_stat
@@ -118,7 +116,13 @@ def get_args():
     parser.add_argument('-k', '--spikein', default=None, 
         choices=[None, 'dm3', 'hg19', 'hg38', 'mm10'],
         help='Spike-in genome : dm3, hg19, hg38, mm10, default: None')
-    parser.add_argument('-x', '--index_ext', nargs='+', dest='index_ext',
+    parser.add_argument('--align-to-te', action='store_true',
+        dest='align_to_te', help='if spcified, align reads to TE')
+    parser.add_argument('--te-index', default=None, dest='te_index',
+        help='path to the align index for TE, default: None')
+    parser.add_argument('--te-gtf', default=None, dest='te_gtf',
+        help='required if use --te-index, the path to GTF file')
+    parser.add_argument('-x', '--extra-index', nargs='+', dest='extra_index',
         help='Provide extra alignment index(es) for alignment, support multiple\
         indexes. eg. Transposon, tRNA, rRNA and so on.')
     parser.add_argument('--gtf', default=None,
@@ -134,6 +138,19 @@ def get_args():
         help='strandness, 1=sens, 2=anti, 0=ignore, default:1\
         This is for featureCounts, dUTP strand-specific mode, \
         read2 is sense strand.')
+    parser.add_argument('--library-type', default='fr-firststrand',
+        help='fr-unstranded: Standard Illumina Reads from the left-most end of \
+        the fragment (in transcript coordinates) map to the transcript strand, \
+        and the right-most end maps to the opposite strand. \
+        fr-firststrand:dUTP, NSR, NNSR Same as above except we enforce the rule \
+        that the right-most end of the fragment (in transcript coordinates) is \
+        the first sequenced (or only sequenced for single-end reads). Equivalently, \
+        it is assumed that only the strand generated during first strand synthesis \
+        is sequenced. fr-secondstrand: Ligation, Standard SOLiD Same as above except \
+        we enforce the rule that the left-most end of the fragment (in transcript \
+        coordinates) is the first sequenced (or only sequenced for single-end reads). \
+        Equivalently, it is assumed that only the strand generated during second \
+        strand synthesis is sequenced.')
     parser.add_argument('--aligner', default='bowtie', 
         choices=['bowtie', 'bowtie2', 'STAR'],
         help='Choose which aligner to use. default: bowtie')
@@ -151,6 +168,8 @@ def get_args():
 
 def init_rnaseq_project(x, analysis_type=1):
     """Create directories for RNAseq project
+    :args analysis_type, 1 mapping
+    :args analysis_tyep, 2 de_analysis
     x str, path to directory of project
     analysis_type int, 1=mapping, 2=de_analysis
     group 1, 1=gene, 2=te, 3=other
@@ -164,16 +183,16 @@ def init_rnaseq_project(x, analysis_type=1):
     group_dict = {
         1: 'gene',
         2: 'transposon',
-        3: 'extra_genes'
+        3: 'extra'
     }
 
     # choose A or B
-    path = path_dict.get(analysis_type, None)
-    if path is None:
+    sub_path = path_dict.get(analysis_type, None)
+    if sub_path is None:
         raise Exception('rnaseq-group, expect 1 or 2, not None')
 
     # create directories
-    prj_path = []
+    project_path = []
     out_dict = collections.defaultdict(dict)
     for group in [1, 2, 3]:
         # group
@@ -181,20 +200,18 @@ def init_rnaseq_project(x, analysis_type=1):
         if group_name is None:
             raise Exception('[1,2,3] for group supported')
         # path
-        for p in path:
-            path_path = os.path.join(x, group_name, p)
-            prj_path.append(path_path)
-            is_path(path_path)
-
-        # save as dict    
-        for n, p in zip(path, prj_path):
-            out_dict[group_name][n] = p
+        for p in sub_path:
+            p_path = os.path.join(x, group_name, p)
+            is_path(p_path)
+            project_path.append(p_path)
+            # save to dict
+            out_dict[group_name][p] = p_path
 
     # return values
     return out_dict
 
 
-def run_shell_cmd(cmd, log): 
+def run_shell_cmd(cmd, log):
     try:
         p = subprocess.Popen(cmd, shell=True,
             stdout=subprocess.PIPE,
@@ -277,92 +294,139 @@ def run_featureCounts(gtf, bam_files, out, strandness=0,
     return out
 
 
-def mapping_gene(fq_files, smp_name, args):
+def gene_aligner(fq_files, smp_name, args):
     """Mapping reads to genome
     control or treatment
     args dict, the arguments of pipeline
+    check index
+    1. rRNA
+    2. genome
+    3. spike-in-rRNA
+    4. spike-in
     """
     project_path = init_rnaseq_project(args['path_out'], analysis_type=1)
-    mapping_gene_path = project_path['gene']
+    gene_align_path = project_path['gene']
 
     ## qc-report
-    qc_path = os.path.join(mapping_gene_path['report'], 'qc')
+    qc_path = os.path.join(gene_align_path['report'], 'qc')
     QC_reporter(fq_files, qc_path).run()
 
     ## update args
-    args_map = args.copy() # make a copy dict
-    tmp1 = args_map.pop('fq1', None) # remove 'fq1' from args
-    tmp2 = args_map.pop('path_out', None) # remove 'path_out' from args
-    tmp3 = args_map.pop('smp_name', None) # remove 'smp_name' form args
+    args['fq1'] = fq_files
+    args['path_out'] = gene_align_path['mapping']
+    args['smp_name'] = smp_name
+    args['align_to_te'] = False
 
-    map_bam_files, map_bam_ext_files = Alignment(
-        fq1=fq_files, 
-        path_out=mapping_gene_path['mapping'], 
-        smp_name=smp_name, 
-        **args_map).run()
+    ## run alignment
+    map_bam_list = Alignment(**args).run()
 
-    ## mapping-report
-    map_report_path = os.path.join(mapping_gene_path['report'], 'mapping')
-    map_path_list = [mapping_gene_path['mapping'], ]
-    Alignment_reporter(map_path_list, map_report_path).run()
-    
-    ## create bigWig files
-    map_bw_path = mapping_gene_path['bigWig']
-    for bam in map_bam_files:
+    ## filt map_genome
+    map_bam = []
+    for i in map_bam_list:
+        for k in i:
+            if k.endswith('map_' + args['genome'] + '.bam'):
+                map_bam.append(k)
+
+    # create bigWig files
+    for bam in map_bam:
         bam2bigwig(
             bam=bam, 
             genome=args['genome'], 
-            path_out=map_bw_path, 
+            path_out=gene_align_path['bigWig'],
+            strandness=args['s'], 
+            binsize=args['bin_size'],
+            overwrite=args['overwrite'])                
+
+    return map_bam
+
+
+def te_aligner(fq_files, smp_name, args):
+    """Mapping reads to genome
+    control or treatment
+    args dict, the arguments of pipeline
+    check index
+    1. rRNA
+    2. genome
+    3. spike-in-rRNA
+    4. spike-in
+    """
+    project_path = init_rnaseq_project(args['path_out'], analysis_type=1)
+    te_align_path = project_path['transposon']
+
+    args['extra_index'] = None # pre-build
+
+    ## qc-report
+    qc_path = os.path.join(te_align_path['report'], 'qc')
+    QC_reporter(fq_files, qc_path).run()
+
+    ## update args
+    args['fq1'] = fq_files
+    args['path_out'] = te_align_path['mapping']
+    args['smp_name'] = smp_name
+    args['align_to_te'] = True
+
+    ## run alignment
+    map_bam_list = Alignment(**args).run()
+    map_bam = [item for sublist in map_bam_list for item in sublist]
+
+    # create bigWig files
+    for bam in map_bam:
+        bam2bigwig(
+            bam=bam, 
+            genome=args['genome'], 
+            path_out=te_align_path['bigWig'],
             strandness=args['s'], 
             binsize=args['bin_size'],
             overwrite=args['overwrite'])
 
-    ## count
-    count_path = mapping_gene_path['count']
-    count_file = os.path.join(count_path, 'count.txt')
-    ## only kepp replicates
-    map_bam_files = [f for f in map_bam_files if '_rep' in f]
-    run_featureCounts(
-        gtf=args['gtf'], 
-        bam_files=map_bam_files, 
-        out=count_file, 
-        strandness=args['s'], 
-        threads=args['threads'], 
-        overwrite=args['overwrite'])
+    # ## count
+    # count_path = te_align_path['count']
+    # count_file = os.path.join(count_path, 'count.txt')
+    # ## only for replicates
+    # rep_bam = [f for f in map_bam if '_rep' in f.lower()]
+    # run_featureCounts(
+    #     gtf=args['gtf'], 
+    #     bam_files=rep_bam, 
+    #     out=count_file, 
+    #     strandness=args['s'], 
+    #     threads=args['threads'], 
+    #     overwrite=args['overwrite'])
+
+    return map_bam
 
 
-def mapping_te(args):
-    """Mapping reads to transposon censensus
-    only support dm3, currently
+def extra_aligner(fq_files, smp_name, args):
+    """Mapping reads to genome
+    control or treatment
     args dict, the arguments of pipeline
+    check index
+    1. rRNA
+    2. genome
+    3. spike-in-rRNA
+    4. spike-in
     """
-    if not args['genome'] == 'dm3':
-        logging.warning('Only support TE analysis for dm3 genome')
-        return None
+    project_path = init_rnaseq_project(args['path_out'], analysis_type=1)
+    extra_align_path = project_path['extra']
 
-    project_path = init_rnaseq_project(args['path_out'], group=2) # group =1, 2
-    mapping_te_path = project_path['transposon']
+    ## qc-report
+    qc_path = os.path.join(extra_align_path['report'], 'qc')
+    # QC_reporter(fq_files, qc_path).run()
 
-    logging.info('Transposon analysis for TE')
-    te_mapping_path = mapping_te_path['mapping']
-   
-    ## mapping
-    # tre_bam_files, tre_bam_ext_files = Alignment(
-    #     fq1=tre_fqs, path_out=tre_path, smp_name=args['T'], **args_map).run()
-    te_map_bam_files = [b[0] for b in ctl_bam_ext_files] + [b[0] for b in tre_bam_ext_files]
+    ## update args
+    args['fq1'] = fq_files
+    args['path_out'] = extra_align_path['mapping']
+    args['smp_name'] = smp_name
+    args['align_to_te'] = False
 
-    ## count
-    count_path = mapping_te_path['count']
-    count_file = os.path.join(count_path, 'count.txt')
-    te_gtf = Genome(args['genome'], genome_path=args['genome_path']).te()
-    # keep only replicates bam files
-    te_map_bam_files = [f for f in te_map_bam_files if '_rep' in f]
-    run_featureCounts(gtf=te_gtf, bam_files=te_map_bam_files, 
-        out=count_file, strandness=args['s'], threads=args['threads'],
-        overwrite=args['overwrite'])
+    ## run alignment
+    map_bam = Alignment(**args).run()
+
+    ## return
+    return map_bam
 
 
-def run_deseq2(control, treatment, path_out, genome, group='gene'):
+def deseq2_exe(control, treatment, path_out, genome, nameA=None, 
+    nameB=None, group='gene', pvalue=0.05):
     """Run DESeq2 witb count.txt matrix input
     control str, featureCounts output
     treatment str, featureCounts output
@@ -370,7 +434,7 @@ def run_deseq2(control, treatment, path_out, genome, group='gene'):
     group str, gene|transposon|extra_genes
     using custom R script
     """
-    project_path = init_rnaseq_project(path_out, analysis_type=2)
+    project_path = init_rnaseq_project(path_out, analysis_type=2) # 1=mapping, 2=de
     de_path = project_path[group] # gene|transposon|extra_genes
     
     Rscript_exe = which('Rscript')
@@ -382,19 +446,10 @@ def run_deseq2(control, treatment, path_out, genome, group='gene'):
         raise Exception('R script not found: %s' % deseq2_script)
 
     deseq2_path = de_path['de_analysis']
-    count_matrix = os.path.join(deseq2_path, 'count.txt')
-
-    ## merge two matrix using pandas
-    df1 = pd.read_csv(control, '\t', header=0, comment='#', index_col=0)
-    df2 = pd.read_csv(treatment, '\t', header=0, comment='#', index_col=0)
-    ## select count
-    df2x = df2.iloc[:, 5:]
-    df = pd.concat([df1, df2x], axis=1, join='outer').reset_index()
-    df.to_csv(count_matrix, sep='\t', header=True, index=False)
-
-    deseq2_cmd = ' '.join([Rscript_exe, deseq2_script, count_matrix, 
-        genome, deseq2_path])
     deseq2_log = os.path.join(deseq2_path, 'run_DESeq2.log')
+
+    deseq2_cmd = ' '.join([Rscript_exe, deseq2_script, 
+        control, treatment, genome, deseq2_path, nameA, nameB, str(pvalue)])
     run_shell_cmd(deseq2_cmd, deseq2_log)
 
 
@@ -428,72 +483,148 @@ def map_stat(path):
         return None
 
 
-def main():
-    """Main for RNAseq analysis pipeline"""
-    args = args_init(vars(get_args()), trim=False, align=True)
-
-    ## default values
-    args['unique_only'] = True
-    args['align_to_rRNA'] = True
-    if args['gtf'] is None:
-        args['gtf'] = Genome(args['genome'], 
-            genome_path=args['genome_path']).gene_gtf('ensembl')
-
-    
-    ############################################################################
-    ## gene analysis
-    ############################################################################
-    # project_path = init_rnaseq_project(args['path_out'], analysis_type=1)
-
-    # qc stat
-    # mapping
-    # mapping stat
-    # bigWig
-    # count
-    # de_analysis
-
+def gene_rnaseq(args):
+    """RNAseq pipeline analysis for genes
+    require, gtf, bam, ...
+    """
+    group = 'gene' # !!!!
     ## control, args['c']
     ctl_args = args.copy()
-    ctl_fqs = ctl_args['c']
-    ctl_prefix = str_common([os.path.basename(f) for f in ctl_fqs])
-    ctl_prefix = ctl_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
-    if args['C'] is None:
-        args['C'] = ctl_prefix
-    ## path to control
+    ctl_args['align_to_te'] = False # required !!!!
+    ctl_args['extra_index'] = None # required !!!!
     ctl_args['path_out'] = os.path.join(args['path_out'], args['C'])
-    # mapping_gene(ctl_fqs, args['C'], ctl_args)
+    ctl_bam = gene_aligner(args['c'], args['C'], ctl_args)   
+    ## count reads
+    ctl_count = os.path.join(args['path_out'], args['C'], group, 'count', 'count.txt')
+    run_featureCounts(args['gtf'], ctl_bam, ctl_count, strandness=args['s'],
+        threads=args['threads'], overwrite=args['overwrite'])
 
     ## treatment, args['t']
     tre_args = args.copy()
-    tre_fqs = tre_args['t']
-    tre_prefix = str_common([os.path.basename(f) for f in tre_fqs])
+    tre_args['align_to_te'] = False # required !!!!
+    tre_args['extra_index'] = None # required !!!!
+    tre_args['path_out'] = os.path.join(args['path_out'], args['T'])
+    tre_bam = gene_aligner(args['t'], args['T'], tre_args)
+    ## count reads
+    tre_count = os.path.join(args['path_out'], args['T'], 'gene', 'count', 'count.txt')
+    run_featureCounts(args['gtf'], tre_bam, tre_count, strandness=args['s'], 
+        threads=args['threads'], overwrite=args['overwrite'])
+
+    ## de analysis using DESeq2
+    de_path = os.path.join(args['path_out'], args['C'] + '.vs.' + args['T'])
+    deseq2_exe(ctl_count, tre_count, de_path, args['genome'], nameA=args['C'], 
+         nameB=args['T'], group=group)
+
+
+def te_rnaseq(args):
+    """RNAseq pipeline analysis for Transposon, (only support dm3)
+    require, gtf, bam, ...
+    """
+    group = 'transposon' # !!!! only for dm3
+    ## args
+    ## update gtf
+    args['gtf'] = Genome(args['genome']).te_gtf()
+    ## !!!! only for dm3
+    ## !!!! require: --te-gtf, --te-index
+    args['gtf'] = '/home/wangming/data/genome/dm3/FL10B/FL10B_and_transposon/FL10B_transposon.gtf'
+
+    if not os.path.exists(args['gtf']):
+        logging.warning('gtf not exists: %s' % args['gtf'])
+    else:
+        ## control, args['c']
+        ctl_args = args.copy()
+        ctl_args['align_to_te'] = True # required !!!!
+        ctl_args['extra_index'] = None # required !!!!
+        ctl_args['path_out'] = os.path.join(args['path_out'], args['C'])    
+        ctl_bam = te_aligner(args['c'], args['C'], ctl_args)
+        ## count reads
+        ctl_count = os.path.join(args['path_out'], args['C'], group, 'count', 'count.txt')
+        run_featureCounts(args['gtf'], ctl_bam, ctl_count, strandness=args['s'], 
+            threads=args['threads'], overwrite=args['overwrite'])
+
+        ## treatment, args['t']
+        tre_args = args.copy()
+        ctl_args['align_to_te'] = True # required !!!!
+        ctl_args['extra_index'] = None # required !!!!
+        tre_args['path_out'] = os.path.join(args['path_out'], args['T'])
+        tre_bam = te_aligner(args['t'], args['T'], tre_args)
+        ## count reads
+        tre_count = os.path.join(args['path_out'], args['T'], group, 'count', 'count.txt')
+        run_featureCounts(args['gtf'], tre_bam, tre_count, strandness=args['s'], 
+            threads=args['threads'], overwrite=args['overwrite'])
+
+        ## de analysis using DESeq2
+        de_path = os.path.join(args['path_out'], args['C'] + '.vs.' + args['T'])
+        deseq2_exe(ctl_count, tre_count, de_path, args['genome'], nameA=args['C'], 
+            nameB=args['T'], group=group)
+
+
+def extra_rnaseq(args, gtf):
+    """RNAseq pipeline analysis for extra sequences
+    require gtf, bam, ...
+    """
+    group = 'extra'
+    ## update gtf
+    args['gtf'] = gtf
+
+    ## check if extra_index exists
+    if args['extra_index'] is None:
+        logging.warning('extra_index not exists')
+    elif not os.path.exists(gtf):
+        logging.warning('gtf file not exists: %s' % gtf)
+    else:
+        ## control, args['c']
+        ctl_args = args.copy()
+        ctl_args['path_out'] = os.path.join(args['path_out'], args['C'])    
+        mapping_te(args['c'], args['C'], ctl_args)
+        ## count reads
+        ctl_count = os.path.join(args['path_out'], args['C'], group, 'count', 'count.txt')
+        run_featureCounts(args['gtf'], ctl_bam, ctl_count, strandness=1, 
+            threads=args['threads'], overwrite=args['overwrite'])
+
+        ## treatment, args['t']
+        tre_args = args.copy()
+        tre_args['path_out'] = os.path.join(args['path_out'], args['T'])
+        mapping_te(args['t'], args['T'], tre_args)
+        ## count reads
+        tre_count = os.path.join(args['path_out'], args['T'], group, 'count', 'count.txt')
+        run_featureCounts(args['gtf'], tre_bam, tre_count, strandness=1, 
+            threads=args['threads'], overwrite=args['overwrite'])
+
+        ## de analysis using DESeq2
+        de_path = os.path.join(args['path_out'], args['C'] + '_vs_' + args['T'])
+        deseq2_exe(ctl_count, tre_count, de_path, args['genome'], nameA=args['C'], 
+            nameB=args['T'], group=group)
+
+
+def main():
+    """Main for RNAseq analysis pipeline"""
+    args = args_init(vars(get_args()), align=True)
+
+    ## default arguments, for RNAseq2 only
+    args['unique_only'] = True
+    args['align_to_rRNA'] = True
+
+    if args['gtf'] is None:
+        args['gtf'] = Genome(**args).gene_gtf('ensembl')
+
+    ## update prefix
+    ctl_prefix = str_common([os.path.basename(f) for f in args['c']])
+    ctl_prefix = ctl_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
+    if args['C'] is None:
+        args['C'] = ctl_prefix
+    tre_prefix = str_common([os.path.basename(f) for f in args['t']])
     tre_prefix = tre_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
     if args['T'] is None:
         args['T'] = tre_prefix
-    ## path to treatment
-    tre_args['path_out'] = os.path.join(args['path_out'], args['T'])
-
-    ## de_analysis
-    ## gene, transposon, extra_genes
-    de_args = args.copy()
-    de_path = os.path.join(args['path_out'], args['C'] + '_vs_' + args['T'])
-    is_path(de_path)
-
-    ## gene
-    count_ctl = os.path.join(ctl_args['path_out'], 'gene', 'count', 'count.txt')
-    count_tre = os.path.join(tre_args['path_out'], 'gene', 'count', 'count.txt')
-    gene_de_path = de_path
-    run_deseq2(
-        control=count_ctl,
-        treatment=count_tre,
-        path_out=de_path,
-        genome=args['genome'],
-        group='gene')
-
     
+    ## run pipeline
+    ## gene
+    gene_rnaseq(args)
 
-
-
+    ## te
+    if args['align_to_te']:
+        te_rnaseq(args)
 
 
 if __name__ == '__main__':
@@ -501,3 +632,37 @@ if __name__ == '__main__':
 
 
 # EOF
+
+
+# def counting_gene(bam, gtf, path_out, threads=4, overwrite=True):
+#     """Count gene using featureCount"""
+#     # ## count
+#     # count_path = mapping_gene_path['count']
+#     # count_file = os.path.join(count_path, 'count.txt')
+
+#     # ## count BAM 
+#     # ## only for replicates
+#     # rep_bam = [f for f in map_bam if '_rep' in f.lower()]
+#     # run_featureCounts(
+#     #     gtf=args['gtf'], 
+#     #     bam_files=rep_bam, 
+#     #     out=count_file, 
+#     #     strandness=args['s'], 
+#     #     threads=args['threads'], 
+#     #     overwrite=args['overwrite'])
+
+#     # check BAM index
+
+#     # output file
+#     count_file = os.path.join(path_out, 'count.txt')
+
+#     # run featureCounts
+#     run_featureCounts(
+#         gtf=gtf, 
+#         bam_files=bam, 
+#         out=count_file, 
+#         threads=threads, 
+#         overwrite=overwrite)
+
+#     # return
+#     return count_file

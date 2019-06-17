@@ -29,10 +29,20 @@ from requests import get  # to make GET request
 # from goldclip.helper import *
 
 
-logging.basicConfig(format = '[%(asctime)s] %(message)s', 
-                    datefmt = '%Y-%m-%d %H:%M:%S', 
-                    level = logging.DEBUG)
+# logging.basicConfig(format = '[%(asctime)s] %(message)s', 
+#                     datefmt = '%Y-%m-%d %H:%M:%S', 
+#                     level = logging.DEBUG)
 
+logging.basicConfig(
+    format='[%(asctime)s %(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    stream=sys.stdout)
+log = logging.getLogger(__name__)
+
+
+def eprint(*args, **kwargs):
+    """Print to stderr"""
+    print(*args, file=sys.stderr, **kwargs)
 
 
 def gzip_file(x, decompress=False, rm=True):
@@ -47,7 +57,7 @@ def gzip_file(x, decompress=False, rm=True):
         x_ungz = os.path.splitext(x)[0] # remove extensiion
         if is_gz(x):
             if os.path.exists(x_ungz):
-                logging.info('target file exists, skip ungzip - %s' % x)
+                log.info('target file exists, skip ungzip - %s' % x)
             else:
                 with gzip.open(x, 'rb') as fi, open(x_ungz, 'wb') as fo:
                     fo.writelines(fi)
@@ -56,15 +66,15 @@ def gzip_file(x, decompress=False, rm=True):
                     os.remove(x)
             tag = x_ungz
         else:
-            logging.info('expect a gzip file, skip unzip- %s' % x)
+            log.info('expect a gzip file, skip unzip- %s' % x)
     else:
         ## compress
         xgz = x + '.gz'
         if os.path.exists(xgz):
-            logging.info('file exists , skip gzip - %s' % xgz)
+            log.info('file exists , skip gzip - %s' % xgz)
             tag = xgz
         elif is_gz(x):
-            logging.info('file is gzipped, skip gzip - %s' % x)
+            log.info('file is gzipped, skip gzip - %s' % x)
             tag = x
         else:
             with open(x, 'rb') as fi, gzip.open(xgz, 'wb') as fo:
@@ -74,6 +84,80 @@ def gzip_file(x, decompress=False, rm=True):
                 os.remove(x)
             tag = xgz
     return tag
+
+
+def gzip_file2(x, decompress=False, rm=True):
+    """Compress file using gzip command
+    """
+    assert isinstance(x, str)
+
+    tag = False
+    if decompress:
+        ## decompress
+        x_ungz = os.path.splitext(x)[0] # remove extensiion
+        if is_gz(x):
+            if os.path.exists(x_ungz):
+                log.info('target file exists, skip ungzip - %s' % x)
+            else:
+                cmd = 'gunzip {}'.format(x)
+                run_shell_cmd(cmd)
+                # with gzip.open(x, 'rb') as fi, open(x_ungz, 'wb') as fo:
+                #     fo.writelines(fi)
+
+                # if rm:
+                #     os.remove(x)
+            tag = x_ungz
+        else:
+            log.info('expect a gzip file, skip unzip- %s' % x)
+    else:
+        ## compress
+        xgz = x + '.gz'
+        if os.path.exists(xgz):
+            log.info('file exists , skip gzip - %s' % xgz)
+            tag = xgz
+        elif is_gz(x):
+            log.info('file is gzipped, skip gzip - %s' % x)
+            tag = x
+        else:
+            cmd = 'gzip {}'.format(x)
+            run_shell_cmd(cmd)
+            # with open(x, 'rb') as fi, gzip.open(xgz, 'wb') as fo:
+            #     fo.writelines(fi)
+
+            # if rm:
+            #     os.remove(x)
+            tag = xgz
+    return tag
+
+
+def run_shell_cmd(cmd):
+    """This command is from 'ENCODE-DCC/atac-seq-pipeline'
+    https://github.com/ENCODE-DCC/atac-seq-pipeline/blob/master/src/encode_common.py
+    """
+    p = subprocess.Popen(['/bin/bash','-o','pipefail'], # to catch error in pipe
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        preexec_fn=os.setsid) # to make a new process with a new PGID
+    pid = p.pid
+    pgid = os.getpgid(pid)
+    log.info('run_shell_cmd: PID={}, PGID={}, CMD={}'.format(pid, pgid, cmd))
+    stdout, stderr = p.communicate(cmd)
+    rc = p.returncode
+    err_str = 'PID={}, PGID={}, RC={}\nSTDERR={}\nSTDOUT={}'.format(pid, pgid, rc,
+        stderr.strip(), stdout.strip())
+    if rc:
+        # kill all child processes
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except:
+            pass
+        finally:
+            raise Exception(err_str)
+    else:
+        log.info(err_str)
+    return stdout.strip('\n')
 
 
 def findfiles(which, where='.'):
@@ -104,7 +188,10 @@ def which(program):
 
 
 def args_checker(d, x, update=False):
-    """Check if dict and x are consitent"""
+    """Check if dict and x are consitent
+    d is dict
+    x is pickle file
+    """
     assert isinstance(d, dict)
     flag = None
     if os.path.exists(x):
@@ -122,7 +209,8 @@ def args_checker(d, x, update=False):
         with open(x, 'wb') as fo:
             pickle.dump(d, fo, protocol=pickle.HIGHEST_PROTOCOL)
     else:
-        logging.error('illegal x= argument: %s' % x)
+        log.error('illegal x= argument: %s' % x)
+
     return flag
 
 
@@ -131,7 +219,7 @@ def args_logger(d, x, overwrite=False):
         key: value
     """
     assert isinstance(d, dict)
-    n = ['%20s : %-40s' % (k, d[k]) for k in list(d.keys())]
+    n = ['%20s : %-40s' % (k, d[k]) for k in sorted(list(d.keys()))]
     if os.path.exists(x) and overwrite is False:
         return True
     else:
@@ -141,8 +229,14 @@ def args_logger(d, x, overwrite=False):
 
 
 def is_gz(filepath):
-    with open(filepath, 'rb') as test_f:
-        return binascii.hexlify(test_f.read(2)) == b'1f8b'
+    if os.path.exists(filepath):
+        with open(filepath, 'rb') as test_f:
+            return binascii.hexlify(test_f.read(2)) == b'1f8b'
+    else:
+        if filepath.endswith('.gz'):
+            return True
+        else:
+            return False
 
 
 def xopen(fn, mode='r', bgzip=False):
@@ -180,7 +274,7 @@ def is_path(path, create = True):
                 os.makedirs(path)
                 return True
             except IOError:
-                logging.error('failed to create directories: %s' % path)
+                log.error('failed to create directories: %s' % path)
         else:
             return False
 
@@ -191,25 +285,36 @@ def seq_type(fn, top_n = 1000):
     identify @ for fastq, > for fasta, * unknown
     """
     assert isinstance(fn, str)
-    tag = set()
-    with xopen(fn, 'rt') as fi:
-        for i, line in enumerate(fi):
-            if i > top_n:
-                break
-            elif i % 4 == 0:
-                b = line[0] # the first base
-                if b.lower() in 'acgtn':
-                    continue
+    if os.path.exists(fn):
+        tag = set()
+        with xopen(fn, 'rt') as fi:
+            for i, line in enumerate(fi):
+                if i > top_n:
+                    break
+                elif i % 4 == 0:
+                    b = line[0] # the first base
+                    if b.lower() in 'acgtn':
+                        continue
+                    else:
+                        tag.add(line[0])
                 else:
-                    tag.add(line[0])
-            else:
-                continue
-    if tag ==  {'@'}:
-        return 'fastq'
-    elif tag ==  {'>'}:
-        return 'fasta'
+                    continue
+        if tag ==  {'@'}:
+            fx_type = 'fastq'
+        elif tag ==  {'>'}:
+            fx_type = 'fasta'
+        else:
+            fx_type = None
     else:
-        return None
+        fn_name = os.path.basename(fn).lower()
+        if '.fa' in fn_name or '.fasta' in fn_name:
+            fx_type = 'fasta'
+        elif '.fq' in fn_name or '.fastq' in fn_nmae:
+            fx_type = 'fastq'
+        else:
+            fx_type = None
+
+    return fx_type
 
 
 def is_fastq(fn):
@@ -241,6 +346,25 @@ def file_row_counter(fn):
     freader = gzip.open if is_gz(fn) else open
     with freader(fn, 'rt', encoding="utf-8", errors='ignore') as fi:
         return sum(bl.count('\n') for bl in blocks(fi))
+
+
+def fx_counter(fn):
+    """Count fastq and fasta file
+    only support:
+    sequence in one line:
+    fastq: 1 record = 4-line
+    fasta: 1 record = 2-line
+    """
+    fx_type = seq_type(fn)
+    fx_lines = file_row_counter(fn)
+    if is_empty_file(fn):
+        return 0
+    elif fx_type == 'fasta':
+        return int(fx_lines / 2)
+    elif fx_type == 'fastq':
+        return int(fx_lines / 4)
+    else:
+        return None
 
 
 def str_common(strList, suffix = False):
@@ -296,7 +420,7 @@ def file_prefix(fn, with_path = False):
     assert isinstance(fn, str)
     p1 = os.path.splitext(fn)[0]
     px = os.path.splitext(fn)[1]
-    if px.endswith('gz') or px.endswith('.bz'):
+    if px.endswith('gz') or px.endswith('.bz2'):
         px = os.path.splitext(p1)[1] + px
         p1 = os.path.splitext(p1)[0]
     if not with_path:
@@ -336,6 +460,28 @@ def filename_shorter(fn, with_path=False):
     return p2 + px
 
 
+def rm_file(x):
+    """remove files"""
+    if isinstance(x, str):
+        if os.path.exists(x):
+            log.info('removing file: %s' % x)
+            os.remove(x)
+        else:
+            log.info('file does not exists: %s' % x)
+    elif isinstance(x, list):
+        tmp = [rm_file(i) for i in x]
+
+
+def is_empty_file(x):
+    """Test if file is empty
+    Return True fi the uncompressed data in x have zero length
+    or x itself has zero length
+    """
+    with xopen(x, 'rb') as fi:
+        data = fi.read(1)
+    return len(data) == 0
+
+
 ################################################################################
 ## virtualenv 
 def is_venv():
@@ -364,7 +510,7 @@ def _venv_into(venv, out = False):
         elif sys.version_info[0:1] >=  (3, ):
             exec(open(venv_bin).read(), {}, dict(__file__ = venv_bin)) #python3
         else:
-            logging.error('unknown version of python: ' + sys.version)        
+            log.error('unknown version of python: ' + sys.version)        
     else:
         pass
         #subprocess.run(['deactivate'])
@@ -384,7 +530,7 @@ def venv_checker(venv = '~/envs/py27', into_venv = True):
         elif os.path.exists(venv_in):
             _venv_into(venv_in)
         else:
-            logging.error('virtualenv not exists - ' + venv)
+            log.error('virtualenv not exists - ' + venv)
     else: # exit env
         if is_venv() and venv_in ==  sys.prefix:
             _venv_into(venv_in, out = True)
@@ -394,56 +540,6 @@ def venv_checker(venv = '~/envs/py27', into_venv = True):
 
 ################################################################################
 ## config
-def bam2bw(bam, genome, path_out, strandness=True, binsize=1, overwrite=False):
-    """
-    Convert bam to bigWig using deeptools
-    https://deeptools.readthedocs.io/en/develop/content/feature/effectiveGenomeSize.html
-    history:
-    1. Mappable sequence of a genome, see Table 1 in 
-       url: https://www.nature.com/articles/nbt.1518.pdf
-    2. effective genome size:
-        - non-N bases
-        - regions (of some size) uniquely mappable
-    3. UCSC
-    http://genomewiki.ucsc.edu/index.php/Hg19_100way_Genome_size_statistics
-    http://genomewiki.ucsc.edu/index.php/Hg38_7-way_Genome_size_statistics
-    """
-    assert is_path(path_out)
-    effsize = {'dm3': 162367812,
-               'dm6': 142573017,
-               'mm9': 2620345972,
-               'mm10': 2652783500,
-               'hg19': 2451960000,
-               'hg38': 2913022398,}
-    gsize = effsize[genome]
-    # prefix = os.path.basename(os.path.splitext(bam)[0])
-    prefix = file_prefix(bam)[0]
-    bw_log = os.path.join(path_out, prefix + '.deeptools.log')
-    if strandness:
-        bw_fwd = os.path.join(path_out, prefix + '.fwd.bigWig')
-        bw_rev = os.path.join(path_out, prefix + '.rev.bigWig')
-        c1 = 'bamCoverage -b {} -o {} --binSize {} --filterRNAstrand forward \
-              --normalizeTo1x {}'.format(bam, bw_fwd, binsize, gsize)
-        c2 = 'bamCoverage -b {} -o {} --binSize {} --filterRNAstrand reverse \
-              --normalizeTo1x {}'.format(bam, bw_rev, binsize, gsize)
-        if os.path.exists(bw_fwd) and os.path.exists(bw_rev) and not overwrite:
-            logging.info('file exists, bigWig skipped ...')
-        else:
-            with open(bw_log, 'wt') as fo:
-                subprocess.run(shlex.split(c1), stdout=fo, stderr=fo)
-            with open(bw_log, 'wa') as fo:
-                subprocess.run(shlex.split(c2), stdout=fo, stderr=fo)
-    else:
-        bw = os.path.join(path_out, prefix + '.bigWig')
-        c3 = 'bamCoverage -b {} -o {} --binSize {} \
-              --normalizeTo1x {}'.format(bam, bw, binsize, gsize)
-        if os.path.exists(bw) and not overwrite:
-            logging.info('file exists, bigWig skipped ...')
-        else:
-            with open(bw_log, 'wt') as fo:
-                subprocess.run(shlex.split(c3), stdout=fo, stderr=fo)
-
-
 def bam_merge(bam_ins, bam_out):
     """
     merge multiple bam files
@@ -478,7 +574,7 @@ def bed_parser(fn, usecols = None):
     if not pathlib.Path(fn).is_file() or os.path.getsize(fn) ==  0:
         df = pd.DataFrame(columns = ['chr', 'start', 'end', 'name', 'score', 
                                      'strand'])
-        logging.warning('empty bed file: %s' % fn)
+        log.warning('empty bed file: %s' % fn)
         return df
     else:
         df = pd.read_table(fn, '\t', usecols = usecols, header = None,
@@ -500,7 +596,7 @@ def bam2bigwig2(bam, path_out, scale=1, binsize=1, overwrite=False):
     c = '%s --bam %s -o %s --scaleFactor %s --binSize %s' % (bamcoverage_exe, 
         bam, bw_out, scale, binsize)
     if os.path.exists(bw_out) and overwrite is False:
-       logging.info('bigWig file exists, %s' % bw_out) 
+       log.info('bigWig file exists, %s' % bw_out) 
     else:
         with open(bw_log, 'wt') as fo:
             subprocess.run(shlex.split(c), stdout=fo, stderr=fo)
@@ -508,7 +604,7 @@ def bam2bigwig2(bam, path_out, scale=1, binsize=1, overwrite=False):
             raise ValueError('failed to create bigWig file, %s' % bw_out)
 
 
-def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False):
+def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False, **kwargs):
     """Convert bam to bigWig using deeptools
     https://deeptools.readthedocs.io/en/develop/content/feature/effectiveGenomeSize.html
     history:
@@ -543,20 +639,24 @@ def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False):
                'hg38': 2913022398,}
     gsize = effsize[genome]
 
+    # create bam index
+    BAM(bam).index()
+
     # prefix = os.path.basename(os.path.splitext(bam)[0])
     prefix = file_prefix(bam)[0]
     bw_log = os.path.join(path_out, prefix + '.deeptools.log')
-    logging.info('create bigWig for: %s' % prefix)
+    log.info('create bigWig for: %s' % prefix)
     if strandness > 0:
         # strandness
         bw_fwd = os.path.join(path_out, prefix + '.fwd.bigWig')
         bw_rev = os.path.join(path_out, prefix + '.rev.bigWig')
-        if strandness == 2:
-            bw_fwd, bw_rev = [bw_rev, bw_fwd]
+        # print(bw_fwd)
+        # if strandness == 2:
+        #     bw_fwd, bw_rev = [bw_rev, bw_fwd]
         
         # file existence
         if os.path.exists(bw_fwd) and os.path.exists(bw_rev) and overwrite is False:
-            logging.info('bigWig file exists, skipped: %s' % prefix)
+            log.info('file exists : %s' % prefix)
         else:
             # attention; bamCoverage using dUTP-based library
             # reverse, forward
@@ -565,7 +665,7 @@ def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False):
             c2 = 'bamCoverage -b {} -o {} --binSize {} --filterRNAstrand reverse \
                   --effectiveGenomeSize {}'.format(bam, bw_rev, binsize, gsize)
             if os.path.exists(bw_fwd) and os.path.exists(bw_rev) and not overwrite:
-                logging.info('file exists, bigWig skipped ...')
+                log.info('file exists, bigWig skipped ...')
             else:
                 with open(bw_log, 'wt') as fo:
                     p1 = subprocess.run(shlex.split(c1), stdout=fo, stderr=fo)
@@ -576,17 +676,165 @@ def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False):
         # strandless
         bw = os.path.join(path_out, prefix + '.bigWig')
         if os.path.exists(bw) and overwrite is False:
-            logging.info('bigWig file exists, skipping: %s' % prefix)
+            log.info('bigWig file exists, skipping: %s' % prefix)
         else:
             c3 = 'bamCoverage -b {} -o {} --binSize {} \
                   --effectiveGenomeSize {}'.format(bam, bw, binsize, gsize)
             if os.path.exists(bw) and not overwrite:
-                logging.info('file exists, bigWig skipped ...')
+                log.info('file exists, bigWig skipped ...')
             else:
                 with open(bw_log, 'wt') as fo:
                     subprocess.run(shlex.split(c3), stdout=fo, stderr=fo)
             if not os.path.exists(bw):
                 raise ValueError('output file is missing, check log file: %s' % bw_log)
+
+
+# def bam2bw(bam, genome, path_out, strandness=True, binsize=1, overwrite=False):
+#     """
+#     Convert bam to bigWig using deeptools
+#     https://deeptools.readthedocs.io/en/develop/content/feature/effectiveGenomeSize.html
+#     history:
+#     1. Mappable sequence of a genome, see Table 1 in 
+#        url: https://www.nature.com/articles/nbt.1518.pdf
+#     2. effective genome size:
+#         - non-N bases
+#         - regions (of some size) uniquely mappable
+#     3. UCSC
+#     http://genomewiki.ucsc.edu/index.php/Hg19_100way_Genome_size_statistics
+#     http://genomewiki.ucsc.edu/index.php/Hg38_7-way_Genome_size_statistics
+#     """
+#     assert is_path(path_out)
+#     effsize = {'dm3': 162367812,
+#                'dm6': 142573017,
+#                'mm9': 2620345972,
+#                'mm10': 2652783500,
+#                'hg19': 2451960000,
+#                'hg38': 2913022398,}
+#     gsize = effsize[genome]
+#     # prefix = os.path.basename(os.path.splitext(bam)[0])
+#     prefix = file_prefix(bam)[0]
+#     bw_log = os.path.join(path_out, prefix + '.deeptools.log')
+#     if strandness:
+#         bw_fwd = os.path.join(path_out, prefix + '.fwd.bigWig')
+#         bw_rev = os.path.join(path_out, prefix + '.rev.bigWig')
+#         c1 = 'bamCoverage -b {} -o {} --binSize {} --filterRNAstrand forward \
+#               --normalizeTo1x {}'.format(bam, bw_fwd, binsize, gsize)
+#         c2 = 'bamCoverage -b {} -o {} --binSize {} --filterRNAstrand reverse \
+#               --normalizeTo1x {}'.format(bam, bw_rev, binsize, gsize)
+#         if os.path.exists(bw_fwd) and os.path.exists(bw_rev) and not overwrite:
+#             log.info('file exists, bigWig skipped ...')
+#         else:
+#             with open(bw_log, 'wt') as fo:
+#                 subprocess.run(shlex.split(c1), stdout=fo, stderr=fo)
+#             with open(bw_log, 'wa') as fo:
+#                 subprocess.run(shlex.split(c2), stdout=fo, stderr=fo)
+#     else:
+#         bw = os.path.join(path_out, prefix + '.bigWig')
+#         c3 = 'bamCoverage -b {} -o {} --binSize {} \
+#               --normalizeTo1x {}'.format(bam, bw, binsize, gsize)
+#         if os.path.exists(bw) and not overwrite:
+#             log.info('file exists, bigWig skipped ...')
+#         else:
+#             with open(bw_log, 'wt') as fo:
+#                 subprocess.run(shlex.split(c3), stdout=fo, stderr=fo)
+
+
+def bam2bw(bam, path_out, scale=1, **args):
+    """Convert bam to bigWig using deeptools
+    https://deeptools.readthedocs.io/en/develop/content/feature/effectiveGenomeSize.html
+    history:
+    1. Mappable sequence of a genome, see Table 1 in 
+       url: https://www.nature.com/articles/nbt.1518.pdf
+    2. effective genome size:
+        - non-N bases
+        - regions (of some size) uniquely mappable
+    3. UCSC
+    http://genomewiki.ucsc.edu/index.php/Hg19_100way_Genome_size_statistics
+    http://genomewiki.ucsc.edu/index.php/Hg38_7-way_Genome_size_statistics
+
+    !!! strandness
+    default: dUTP-based library (read2 is sense strand, read1 is anti-sense strand)
+    general RNA library: (NSR, small-RNA-library), read1 is sense, read2 is antisense
+
+    --scaleFactor
+    --filterRNAstrand
+    --samFlagExclude
+    --samFlagInclude
+    --genome
+
+
+    """
+    assert os.path.exists(bam)
+    assert is_path(path_out)
+    assert isinstance(scale, float)
+
+    effsize = {'dm3': 162367812,
+               'dm6': 142573017,
+               'mm9': 2620345972,
+               'mm10': 2652783500,
+               'hg19': 2451960000,
+               'hg38': 2913022398,}
+    gsize = effsize.get(args['genome'], None)
+
+    ## command
+    bamcoverage_exe = which('bamCoverage')
+    if bamcoverage_exe is None:
+        raise ValueError('%10s | program not found: bamCoverage' % 'failed')
+
+    # create bam index
+    BAM(bam).index()
+
+    prefix = file_prefix(bam)[0]
+    bw_log = os.path.join(path_out, prefix + '.deeptools.log')
+    log.info('create bigWig for: %s' % prefix)
+    
+    ## genome
+    if gsize is None:
+        ## no model organism
+        opt1 = ''
+    else:
+        opt1 = '--effectiveGenomeSize ' + str(gsize)
+
+    ## filt RNA strand
+    if args['filterRNAstrand'] is None:
+        bw_file = os.path.join(path_out, prefix + '.bigWig')
+        opt2 = ''
+    else:
+        if args['filterRNAstrand'] == 'forward':
+            if args['library_type'] == 2:
+                bw_file = os.path.join(path_out, prefix + '.rev.bigWig')
+            else:
+                bw_file = os.path.join(path_out, prefix + '.fwd.bigWig')
+        elif args['filterRNAstrand'] == 'reverse':
+            if args['library_type'] == 2:
+                bw_file = os.path.join(path_out, prefix + '.fwd.bigWig')
+            else:
+                bw_file = os.path.join(path_out, prefix + '.rev.bigWig')
+        else:
+            log.error('argument --filterRNAstrand: invalid choice: (\'forward\', \'reverse\')')
+        opt2 = '--filterRNAstrand ' + str(args['filterRNAstrand'])
+
+    ## opt
+    opt3 = '--scaleFactor %s -b %s -o %s --binSize %s -p %s' % (scale, bam, bw_file, args['binsize'], args['p'])
+
+    ## cmd
+    cmd = ' '.join([bamcoverage_exe, opt1, opt2, opt3])
+    
+    ## run
+    if os.path.exists(bw_file) and not args['overwrite']:
+        log.info('file exists, skipped: %s' % bam)
+    else:
+        bw_log = os.path.splitext(bw_file)[0] + '.log'
+        with open(bw_log, 'wt') as fo:
+            p = subprocess.run(shlex.split(cmd), stdout=fo, stderr=fo)
+
+    ## check rresults
+    if not os.path.exists(bw_file):
+        raise Exception('bamCoverage failed, output not found: %s' % bw_file)
+
+    ## return
+    return bw_file
+
 
 
 ################################################################################
@@ -648,9 +896,9 @@ class Genome(object):
         fa_gz = fa + '.gz'
         if not os.path.exists(fa):
             if os.path.exists(fa_gz):
-                logging.error('require to unzip the fasta file: %s' % fa_gz)
+                log.error('require to unzip the fasta file: %s' % fa_gz)
             else:
-                logging.error('fasta file not detected: %s' % fa)
+                log.error('fasta file not detected: %s' % fa)
             return None
         else:
             return fa
@@ -667,7 +915,7 @@ class Genome(object):
         fa_size = os.path.join(self.genome_path, self.genome, 'bigZips', 
             self.genome + '.chrom.sizes')
         if not os.path.exists(fa_size):
-            logging.info('Downloading chrom.sizes from UCSC')
+            log.info('Downloading chrom.sizes from UCSC')
             url = 'http://hgdownload.cse.ucsc.edu/goldenPath/%s/bigZips/%s.chrom.sizes' % self.genome
             download(url, fa_size)
         return fa_size
@@ -829,7 +1077,7 @@ class Genome(object):
         return g
 
 
-    def te(self, format='gtf'):
+    def te_gtf(self, format='gtf'):
         """Return TE annotation of the genome
         or return TE consensus sequence for the genome (dm3)
         """
@@ -867,6 +1115,11 @@ class BAM(object):
 
     def sort(self):
         """Sort bam fle"""
+        pass
+
+
+    def merge(self):
+        """Merge multiple BAM files"""
         pass
 
 
@@ -997,7 +1250,7 @@ class Bed_parser(object):
             return df
         elif os.path.exists(bed):
             if file_row_counter(bed) == 0:
-                logging.error('empty bed file: %s' % bed)
+                log.error('empty bed file: %s' % bed)
             else:
                 df = pd.read_table(bed, '\t', usecols=usecols, header=None) #,
                         # dtype = {'0': np.str, '1': np.int64, '2': np.int64, '3': np.str, '4': np.int64, '5': np.str})

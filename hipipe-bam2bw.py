@@ -10,49 +10,102 @@ import argparse
 import logging
 import shlex
 import subprocess
-from helper import BAM, bam2bigwig, bam2bigwig2
+from arguments import args_init
+from helper import BAM, bam2bigwig, bam2bigwig2, bam2bw
 
 
 def get_args():
     parser = argparse.ArgumentParser(prog='hipipe-bam2bw', 
                                      description='convert bam to bigWig')
-    parser.add_argument('-i', nargs='+', required=True, metavar='INPUT', 
-        type=argparse.FileType('r'),
-        help='bam files')
-    parser.add_argument('-o', default=None, 
-        metavar='OUTPUT',  help='The directory to save results, default:\
-        current directory.')
-    parser.add_argument('-g', required=True, default='hg19', 
-        metavar='GENOME', choices=['dm3', 'hg19', 'hg38', 'mm10', 'mm9'],
-        help='Reference genome : dm3, hg19, hg39, mm10, default: hg19')
-    parser.add_argument('-s', metavar='strandness', type=int, default=1,
-        help='Strandness, 0=not, 1=forward, 2=reverse, default: 0')
-    parser.add_argument('-c', dest='scale', metavar='scale', type=float, default=1,
-        help='Normalization scale, 0=norm to 1M reads, default: 1')
-    parser.add_argument('-b', metavar='binsize', type=int, default=50,
-        help='binsize of bigWig, default: 50')
+    parser.add_argument('-b', '--bam', nargs='+', required=True, dest='bam',
+        type=str, help='bam files')
+    parser.add_argument('-o', '--out', default=None, dest='path_out',
+        metavar='OUTPUT',  help='The directory to save results. (default:\
+        current directory)')
+    parser.add_argument('-g', '--genome', required=False, default=None, 
+        dest='genome', choices=[None, 'dm3', 'hg19', 'hg38', 'mm10', 'mm9'],
+        help='Reference genome : dm3, hg19, hg39, mm10. (default: hg19)')
+    parser.add_argument('-s', '--scale', nargs='+', required=False, \
+        default=['1.0'], type=float, dest='scale', 
+        help='The computed scaling factor will be multiplied by this. \
+        (default: 1.0)')
+    parser.add_argument('--library-type', dest='library_type',
+        choices=[1, 2], type=int, default=1, help='The library type, \
+        1: minus strand reads map on gene forward strand; dUTP, NSR, ... \
+        2: plus strand reads map on gene forwrad strand; smRNA, CLIP, ... \
+        (default: 1)')
+    parser.add_argument('--filterRNAstrand', required=False, 
+        dest='filterRNAstrand', choices=[None, 'forward', 'reverse', 'both'],
+        help='This is the option bamCoverage command from deeptools: \
+        Selects RNA-seq reads originating from genes on the given \
+        strand. This option assumes a strandard dUTP-based library preparation \
+        (that is, --filterRNAstrand=forward keeps minus-strand reads, which \
+        originally came from genes on the forward strand using a dUTP-based \
+        methods). Consider using --samExcludeFlag instead for filtering by \
+        strand in other contexts. (default: None)')
+    parser.add_argument('--samFlagExclude', required=False, 
+        dest='samFlagExclude', type=int, default=None,
+        help='Exlude reads based on the SAM flag. For example, to get only\
+        reads that map to the forward strand, use --samFlagExclude 16, \
+        which is equal to samtools view -F, where 16 is the SAM flag for \
+        reads that map to the reverse strand. (default: None)')
+    parser.add_argument('--samFlagInclude', required=False,
+        dest='samFlagInclude', type=int, default=None,
+        help='Include reads based on the SAM falg. For example, to get only\
+        reads that are the first mate, using a flag of 64. This is useful to \
+        count properly paired reads only once, as otherwise the second mate \
+        will be also considered for the coverage. (default: None)')
+    parser.add_argument('--binsize', metavar='binsize', type=int, 
+        default=10, dest='binsize', help='binsize of bigWig. (default: 10)')
     parser.add_argument('--overwrite', action='store_true',
         help='if spcified, overwrite exists file')
+    parser.add_argument('-p', type=int, default=1,
+        help='Number of processors to use. (default: 1)')
     args = parser.parse_args()
     return args
 
 
 def main():
-    args = get_args()
-    # current dir
-    if args.o is None:
-        args.o = str(pathlib.Path.cwd())
-    bam_files = [f.name for f in args.i]
+    ## prepare arguments
+    args = args_init(vars(get_args()), bam2bw=True)
+
+    # print(args)
+    if isinstance(args['bam'], str):
+        if isinstance(args['scale'], float):
+            pass
+        else:
+            raise Exception('--bam, --scale, not in the same length')
+    elif isinstance(args['bam'], list):
+        if isinstance(args['scale'], list) and len(args['bam']) == len(args['scale']):
+            pass
+        else:
+            raise Exception('--bam, --scale, not in the same length')
+    else:
+        pass
+
+    ## functions
+    bam_files = args.pop('bam', None)
+    scale_list = args.pop('scale', None)
+    path_out = args.pop('path_out', None)
+
+    ## program
     for bam_file in bam_files:
-        # bam2bigwig(bam=bam_file, genome=args.g, path_out=args.o, 
-        #     strandness=args.s, binsize=args.b, overwrite=args.overwrite)
-        if args.scale == 0:
-            cnt = int(BAM(bam_file).count())
-            args.scale = 1e6 / cnt
-        # scale
-        # bam2bigwig2(bam, path_out, scale=1, binsize=1, overwrite=False)
-        bam2bigwig2(bam=bam_file, path_out=args.o, scale=args.scale, binsize=args.b,
-            overwrite=args.overwrite)
+        i = bam_files.index(bam_file)
+        scale = scale_list[i]
+        ## strand
+        if args['filterRNAstrand'] == 'both':
+            ## forward strand
+            args['filterRNAstrand'] = 'forward'
+            bam2bw(bam_file, path_out, scale, **args)
+            ## reverse strand
+            args['filterRNAstrand'] = 'reverse'
+            bam2bw(bam_file, path_out, scale, **args)
+            ## reset
+            args['filterRNAstrand'] = 'both'
+        else:
+            bam2bw(bam_file, path_out, scale, **args)
+
+
 
 if __name__ == '__main__':
     main()
