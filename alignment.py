@@ -128,8 +128,7 @@ class Alignment(object):
             map_files.append(bam_files)
             ## summarize alignment log
             align_stat = AlignSummarize(path_out=fq_path_out).run()
-            # print(fq_path_out)
-            # print(align_stat)
+            
 
         return map_files
 
