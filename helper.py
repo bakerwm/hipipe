@@ -816,6 +816,10 @@ def bam2bw(bam, path_out, scale=1, **args):
 
     ## opt
     opt3 = '--scaleFactor %s -b %s -o %s --binSize %s -p %s' % (scale, bam, bw_file, args['binsize'], args['p'])
+  
+    ## opt
+    if args['normalizeUsing']:
+        opt3 += ' --normalizeUsing %s' % (args['normalizeUsing'])
 
     ## cmd
     cmd = ' '.join([bamcoverage_exe, opt1, opt2, opt3])
