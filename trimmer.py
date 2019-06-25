@@ -594,7 +594,7 @@ class Cutadapt(object):
                 args_untrim += ' --untrimmed-output=%s \
                     --untrimmed-paired-output=%s --cores=1' % (fq1_untrim, fq2_untrim)
             elif args['rm_untrim']:
-                args_untrim += ' --discard-trimmed --cores=%s' % args['threads']
+                args_untrim += ' --discard-untrimmed --cores=%s' % args['threads']
             else:
                 args_untrim += ' --cores=%s' % args['threads']
 
