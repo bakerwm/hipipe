@@ -23,6 +23,8 @@ def get_args():
     parser.add_argument('--db', required=True, help='Path to Kraken2 database')
     parser.add_argument('--top-n', default=10, type=int, dest='topN',
         help='Show topN species. (default: 10)')
+    parser.add_argument('--save-out', dest='save_out', action='store_true',
+	help='Save alignment output')
     parser.add_argument('--unmap-file', default=None, dest='unmap_file',
         help='Save unclassified reads to file')
     parser.add_argument('--kraken2', default=None, 
