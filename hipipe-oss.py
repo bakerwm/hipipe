@@ -257,10 +257,12 @@ class OSSList(object):
                     dd[acc_id]['folder_url'] = folder_url
                     dd[acc_id]['bucket'] = bucket
                     dd[acc_id]['folder_name'] = folder_name
-                if '区域' in line:
+                if 'region' in line:
                     # 区域: 华北2(北京)
-                    region = line.rstrip().split(' ')[1]
-                    region = region.rstrip().split('(')[0]
+                    # region: China North 2
+                    region = line.strip().split(':')[1]
+                    region = region.strip()
+                    # region = region.strip().split('(')[0]
                     dd[acc_id]['endpoint'] = self.get_endpoint(region)
         return dd
 
