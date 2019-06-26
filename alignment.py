@@ -26,6 +26,13 @@ from arguments import args_init
 from helper import *
 
 
+logging.basicConfig(
+    format='[%(asctime)s %(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    stream=sys.stdout)
+log = logging.getLogger(__name__)
+log.setLevel('INFO')
+
 class Alignment(object):
     """Run alignment
     :args fq1
@@ -93,8 +100,8 @@ class Alignment(object):
             map_files.append(bam_files)
             ## summarize alignment log
             align_stat = AlignSummarize(path_out=fq_path_out).run()
-            # print(fq_path_out)
-            # print(align_stat)
+
+        return map_files
 
 
     def align_pe(self):
@@ -133,10 +140,13 @@ class Alignment(object):
 
         return map_files
 
+
     def run(self):
         if self.fq2 is None:
+            log.info('SE mode')
             map_files = self.align_se()
         else:
+            log.info('PE mode')
             map_files = self.align_pe()
 
         return map_files

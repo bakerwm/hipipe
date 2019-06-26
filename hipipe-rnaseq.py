@@ -440,7 +440,6 @@ def gene_aligner(fq1_files, smp_name, args, fq2_files=None):
 
     ## run alignment
     map_bam_list = Alignment(**args).run()
-    # sys.exit('AAAA')
 
     ## filt map_genome
     map_bam = []
