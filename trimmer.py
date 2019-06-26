@@ -98,7 +98,7 @@ class Fastx(object):
 
         ## open file
         if is_gz(fx_input):
-            cmd_open = 'zcat ' + fx_input
+            cmd_open = 'gunzip -c ' + fx_input
         else:
             cmd_open = 'cat ' + fx_input
 
