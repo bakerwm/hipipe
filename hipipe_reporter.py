@@ -5,11 +5,17 @@ import logging
 import fnmatch
 import subprocess
 import sys
+from helper import run_shell_cmd, which
 
-logging.basicConfig(format = '[%(asctime)s] %(message)s', 
-                    datefmt = '%Y-%m-%d %H:%M:%S', 
-                    level = logging.DEBUG)
+# logging.basicConfig(format = '[%(asctime)s] %(message)s', 
+#                     datefmt = '%Y-%m-%d %H:%M:%S', 
+#                     level = logging.DEBUG)
 
+logging.basicConfig(
+    format='[%(asctime)s %(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    stream=sys.stdout)
+log = logging.getLogger(__name__)
 
 class QC_reporter(object):
     """Make html report for fastqc statistics file
@@ -56,18 +62,18 @@ class QC_reporter(object):
         return fq_files
 
 
-    def run_shell_cmd(self, cmd): 
-        """Run shell command"""
-        try:
-            p = subprocess.run(cmd, shell=True,
-                stdout=subprocess.PIPE,
-                # stderr=subprocess.STDOUT,
-                universal_newlines=True,
-                preexec_fn=os.setsid)
-            logging.info('run_shell_cmd: CMD={}'.format(cmd))
-        except:
-             raise Exception('Killed CMD={}\nSTDOUT={}'.format(
-                 cmd, ret))
+    # def run_shell_cmd(self, cmd): 
+    #     """Run shell command"""
+    #     try:
+    #         p = subprocess.run(cmd, shell=True,
+    #             stdout=subprocess.PIPE,
+    #             # stderr=subprocess.STDOUT,
+    #             universal_newlines=True,
+    #             preexec_fn=os.setsid)
+    #         log.info('run_shell_cmd: CMD={}'.format(cmd))
+    #     except:
+    #          raise Exception('Killed CMD={}\nSTDOUT={}'.format(
+    #              cmd, ret))
 
 
     def check_fastqc(self, path, fqs, overwrite=False):
@@ -85,10 +91,10 @@ class QC_reporter(object):
             f1 = os.path.join(path, prefix + '_fastqc.html')
             f2 = os.path.join(path, prefix + '_fastqc.zip')
             if os.path.exists(f1) and os.path.exists(f2) and overwrite is False:
-                logging.info('file exists, fastqc skipped - %s' % prefix)
+                log.info('file exists, fastqc skipped - %s' % prefix)
                 continue
             else:
-                logging.info('run fastqc - %s' % prefix)
+                log.info('run fastqc - %s' % prefix)
                 fq_tmp.append(fq)
         return fq_tmp
 
@@ -104,18 +110,26 @@ class QC_reporter(object):
         if not os.path.exists(self.output):
             os.makedirs(self.output)
 
+        fastqc_exe = which('fastqc')
+
         # check fastqc output
-        logging.info('fastqc')
+        log.info('fastqc')
         fq_files = self.check_fastqc(self.output, fq_files, overwrite=False)
         
         # run fastqc
         fq_list = ' '.join(fq_files)
-        cmd1 = 'fastqc -t 8 -o %s %s' % (self.output, fq_list)
+        cmd1 = '{} -t 8 -o {} {} 2> {}'.format(
+            fastqc_exe,
+            self.output,
+            fq_list,
+            self.output + '.fastqc.log')
+        # cmd1 = 'fastqc -t 8 -o %s %s' % (self.output, fq_list)
         if len(fq_files) > 0:
-            self.run_shell_cmd(cmd1)
+            run_shell_cmd(cmd1)
+            # self.run_shell_cmd(cmd1)
 
         # fastqc report
-        logging.info('fastqc-report')
+        log.info('fastqc-report')
         main_script = os.path.realpath(__file__)
         home = os.path.dirname(main_script)
         report_r = os.path.join(home, 'qc_report.R')
@@ -128,18 +142,19 @@ class QC_reporter(object):
         else:
             self.template = ''
 
-        cmd2 = 'Rscript %s %s %s' % (report_r, self.output, self.template)
+        Rscript_exe = which('Rscript')
+        cmd2 = ' '.join([Rscript_exe, report_r, self.output, self.template])
 
         if os.path.exists(report_html):
-            logging.info('file exists, fastqc-report skipped')
+            log.info('file exists, fastqc-report skipped')
         else:
-            self.run_shell_cmd(cmd2)
+            run_shell_cmd(cmd2)
 
         if not os.path.exists(report_html):
-            logging.error('failed, generating html file')
+            log.error('failed, generating html file')
 
         # finish
-        logging.info('output - %s' % report_html)
+        log.info('output - %s' % report_html)
 
 
 class Alignment_reporter(object):
@@ -222,7 +237,7 @@ class Alignment_reporter(object):
                 #stderr=subprocess.STDOUT,
                 universal_newlines=True,
                 preexec_fn=os.setsid)
-            logging.info('run_shell_cmd: CMD={}'.format(cmd))
+            log.info('run_shell_cmd: CMD={}'.format(cmd))
             ret = ''
             while True:
                 line = p.stdout.readline()
@@ -261,7 +276,7 @@ class Alignment_reporter(object):
         report_html = self.out_html
 
         ## run
-        logging.info('alignment-report')
+        log.info('alignment-report')
         main_script = os.path.realpath(__file__)
         home = os.path.dirname(main_script)
         align_stat_r = os.path.join(home, 'alignment_stat.R')
@@ -269,14 +284,14 @@ class Alignment_reporter(object):
             self.output, self.template)
 
         if os.path.exists(report_html):
-            logging.info('file exists, alignment-report skipped')
+            log.info('file exists, alignment-report skipped')
         else:
             self.run_shell_cmd(cmd1)
 
         if not os.path.exists(report_html):
-            logging.error('failed generating html file')
+            log.error('failed generating html file')
 
         # finish
-        logging.info('saving results in - %s' % report_html)
+        log.info('saving results in - %s' % report_html)
 
 
