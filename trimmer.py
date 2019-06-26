@@ -40,10 +40,18 @@ import os
 import sys
 import re
 import shlex
+import logging
 import subprocess
 from utils_parser import *
 from helper import *
 from arguments import args_init
+
+
+logging.basicConfig(
+    format='[%(asctime)s %(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    stream=sys.stdout)
+log = logging.getLogger(__name__)
 
 
 class Fastx(object):
@@ -107,7 +115,7 @@ class Fastx(object):
 
 
     def cut(self, cut_left=0, cut_right=0, cut_to_length=0, 
-        len_min=20, cut_from_right=True):
+        len_min=20, cut_from_right=True, discard_tooshort=True):
         """Cut N-bases from fastq or fasta file
         cut_left: 5' end of read
         cut_right: 3' end of read
@@ -131,91 +139,79 @@ class Fastx(object):
 
         log.info('trimming ends: cut5=%d, cut3=%d, cut_to_length=%d' % (cut_left, cut_right, cut_to_length))
 
-        ## option-0
-        ## filter by length
-        cmdx = '%s seq -m %s' % (seqkit_exe, len_min)
-
-        ## option-1
-        ## cut left
-        ## fastx_trimmer -f <cut_left> -m <len_min>
-        cut_left += 1
-        cmd1 = '%s -f %s' % (cut_exe, cut_left)
-
-        ## option-2
-        ## cut right
-        cmd2 = '%s -t %s -m %s' % (cut_exe, cut_right, len_min)
-
-        ## option-3
-        ## cut to length
-        cmd3 = '%s -l %s' % (cut_exe, cut_to_length)
-
         ## fastq file
         if self.fx_type == 'fastq':
-            cmd1 += ' -Q33'
-            cmd2 += ' -Q33'
-            cmd3 += ' -Q33'
+            cut_exe += ' -Q33'
 
-        ## combine options
         if cut_to_length > 0:
-            ## len_min
             if cut_to_length < len_min:
                 raise Exception('arguments conflic, cut_to_length=%s short than len_min=%s' % (cut_to_length, len_min))
-            ## cut from right
+            # cut right
             if cut_from_right:
-                with xopen(self.output, 'w') as fo:
-                    p0 = subprocess.Popen(self.cmd_open, shell=True, stdout=subprocess.PIPE)
-                    p1 = subprocess.Popen(cmd3, shell=True, stdin=p0.stdout, stdout=subprocess.PIPE)
-                    p2 = subprocess.Popen(cmdx, shell=True, stdin=p1.stdout, stdout=subprocess.PIPE)
-                    for line in p2.stdout:
-                        fo.write(line)
-                    ret_code = p2.communicate()
+                cmd = '{} -l {}'.format(
+                    cut_exe,
+                    cut_to_length)
+                if discard_tooshort:
+                    cmd += ' | {} -m {}'.format(
+                        seqkit_exe,
+                        len_min)
             else:
+                # cut left
+                # rev-comp, then cut-right, rev-comp
                 revcomp = which('fastx_reverse_complement')
                 if revcomp is None:
                     raise Exception('command not found in $PATH: fastx_reverse_complement')
-                with xopen(self.output, 'w') as fo:
-                    p0 = subprocess.Popen(self.cmd_open, shell=True, stdout=subprocess.PIPE)
-                    p1 = subprocess.Popen(revcomp, shell=True, stdin=p0.stdout, stdout=subprocess.PIPE)
-                    p2 = subprocess.Popen(cmd3, shell=True, stdin=p1.stdout, stdout=subprocess.PIPE)
-                    p3 = subprocess.Popen(cmdx, shell=True, stdin=p2.stdout, stdout=subprocess.PIPE)
-                    p4 = subprocess.Popen(revcomp, shell=True, stdin=p3.stdout, stdout=subprocess.PIPE)
-                    for line in p4.stdout:
-                        fo.write(line)
-                    ret_code = p4.communicate()
+                cmd = '{} | ' # revcomp
+                cmd += '{} -l {} | ' # cut 
+                cmd += '{} '
+                cmd = cmd.foramt(
+                    revcomp,
+                    cut_exe,
+                    cut_to_length,
+                    revcomp)
+                if discard_tooshort:
+                    cmd += ' | {} -m {}'.format(
+                        seqkit_exe,
+                        len_min)
 
         elif cut_left > 0 and cut_right > 0:
-            ## left + right
-            with xopen(self.output, 'w') as fo:
-                p0 = subprocess.Popen(self.cmd_open, shell=True, stdout=subprocess.PIPE)
-                p1 = subprocess.Popen(cmd1, shell=True, stdin=p0.stdout, stdout=subprocess.PIPE)
-                p2 = subprocess.Popen(cmd2, shell=True, stdin=p1.stdout, stdout=subprocess.PIPE)
-                for line in p2.stdout:
-                    fo.write(line)
-                ret_code = p2.communicate()
+            cmd = '{} -f {} | '
+            cmd += '{} -t {} '
+            cmd = cmd.format(
+                cut_exe,
+                cut_left + 1,
+                cut_exe,
+                cut_right)
+            if discard_tooshort:
+                cmd += '-m {}'.format(len_min)
 
         elif cut_left > 0:
-            ## left
-            with xopen(self.output, 'w') as fo:
-                p0 = subprocess.Popen(self.cmd_open, shell=True, stdout=subprocess.PIPE)
-                p1 = subprocess.Popen(cmd1, shell=True, stdin=p0.stdout, stdout=subprocess.PIPE)
-                p2 = subprocess.Popen(cmdx, shell=True, stdin=p1.stdout, stdout=subprocess.PIPE)
-                # write to file
-                for line in p2.stdout:
-                    fo.write(line)
-                ret_code = p2.communicate() # wait exteral code finish
-                # see https://www.jianshu.com/p/11d3a0a9c7d1
+            cmd = '{} -f {} '.format(
+                cut_exe,
+                cut_left + 1)
+            if discard_tooshort:
+                cmd += ' | {} -m {}'.format(
+                    seqkit_exe,
+                    len_min)
 
         elif cut_right > 0:
-            ## right
-            with xopen(self.output, 'w') as fo:
-                p0 = subprocess.Popen(self.cmd_open, shell=True, stdout=subprocess.PIPE)
-                p1 = subprocess.Popen(cmd2, shell=True, stdin=fi, stdout=subprocess.PIPE)
-                for line in p1.stdout:
-                    fo.write(line)
-                p1.communicate()
+            cmd = '{} -t {} '
+            if discard_tooshort:
+                cmd += ' -m {} '.format(len_min)
+            cmd = cmd.format(
+                cut_exe,
+                cut_right)
+
         else:
-            ## no
             pass
+
+        # run program
+        cmd = '{} | {} > {}'.format(
+            self.cmd_open,
+            cmd,
+            self.output)
+
+        run_shell_cmd(cmd)
 
         return self.output
 
@@ -231,41 +227,23 @@ class Fastx(object):
 
         log.info('removing PCR dup')
 
-        cmd = fastx_collapser
+        # cmd = fastx_collapser
         if self.fx_type == 'fastq':
-            cmd += ' -Q33'
+            fastx_collapser += ' -Q33'
 
-        if self.output_fasta:
-            # require
-            # 1. collapser
-            with xopen(self.output, 'wt') as fo:
-                p0 = subprocess.Popen(self.cmd_open, shell=True, stdout=subprocess.PIPE)
-                p1 = subprocess.Popen(cmd, shell=True, stdin=p0.stdout, stdout=subprocess.PIPE)
-                for line in p1.stdout:
-                    fo.write(line)
-                re_code = p1.communicate()
-        else:
-            # require
-            # 1. collapser
-            # 2. fa2fq
-            with xopen(self.output, 'wt') as fo:
-                p0 = subprocess.Popen(self.cmd_open, shell=True, stdout=subprocess.PIPE)
-                p1 = subprocess.Popen(cmd, shell=True, stdin=p0.stdout, stdout=subprocess.PIPE)
-                name = None
-                for line in p1.stdout:
-                    line = line.decode() # bytes to str
-                    if line.startswith('>'):
-                        if isinstance(name, str):
-                            fo.write('\n'.join(['@' + name, sequence, '+', seq_quality]) + '\n')
-                        name = line.strip()
-                        sequence = ""
-                        seq_quality = ""
-                    else:
-                        sequence += line.strip()
-                        seq_quality = 'J' * len(sequence)
-                # the last record
-                fo.write('\n'.join(['@' + name, sequence, '+', seq_quality]) + '\n')
-                re_code = p1.communicate()
+        # require
+        # 1. collapser
+        cmd = '{} | {} > {}'.format(
+            self.cmd_open,
+            fastx_collapser,
+            self.output)
+        run_shell_cmd(cmd)
+
+        if not self.output_fasta:
+            # fa2fq
+            out_tmp = self.output + '.tmp'
+            os.rename(self.output, out_tmp)
+            self.fa2fq(out_tmp, self.output)
 
         return self.output
 
@@ -276,15 +254,15 @@ class Fastx(object):
         if revcomp is None:
             raise Exception('command not found in $PATH: fastx_reverse_complement')
 
-        cmd = revcomp
         if self.fx_type == 'fastq':
-            cmd += ' -Q33'
+            revcomp += ' -Q33'
 
-        with xopen(self.input, 'rb') as fi, xopen(self.output, 'w') as fo:
-            p = subprocess.Popen(cmd, shell=True, stdin=fi, stdout=subprocess.PIPE)
-            for line in p.stdout:
-                fo.write(line)
-            p.communicate()
+        cmd = '{} | {} > {}'.format(
+            self.cmd_open, 
+            revcomp,
+            self.output)
+
+        run_shell_cmd(cmd)
 
         return self.output
 
@@ -301,8 +279,8 @@ class Fastx(object):
         assert isinstance(n, int)
         assert isinstance(p, float)
 
-        seqkit = which('seqkit')
-        if seqkit is None:
+        seqkit_exe = which('seqkit')
+        if seqkit_exe is None:
             raise Exception('command not found in $PATH: seqkit')
 
         log.info('extracting sub-sample: n=%d' % n)
@@ -311,13 +289,12 @@ class Fastx(object):
         if n > 1000000 or p > 0.1:
             log.warning('choose a smaller number.')
 
-        cmd = '%s sample -n %s' % (seqkit, n)
-
-        with xopen(self.input, 'rb') as fi, xopen(self.output, 'w') as fo:
-            p = subprocess.Popen(cmd, shell=True, stdin=fi, stdout=subprocess.PIPE)
-            for line in p.stdout:
-                fo.write(line)
-            p.communicate()
+        cmd = '{} | {} sample -n {} > {}'.format(
+            self.cmd_open,
+            seqkit_exe,
+            n,
+            self.output)
+        run_shell_cmd(cmd)
 
         return self.output
 
@@ -357,7 +334,17 @@ class Fastx(object):
 
 
     def fq2fa(self):
-        pass
+        seqkit_exe = which('seqkit')
+        if seqkit_exe is None:
+            raise Exception('command not found in $PATH: seqkit')
+
+        cmd = '{} | {} fq2fa > {}'.format(
+            self.cmd_open,
+            seqkit_exe,
+            self.output)
+        run_shell_cmd(cmd)
+
+        return self.output
 
 
 class Cutadapt(object):
@@ -834,11 +821,18 @@ class Trimmer(object):
         else:
             args_logger(args, args_file, True) # update arguments.txt
 
+        ## determine the len_min 
+        ## cut_after_trim
+        ## cut_after_rmdup
+        cut1, cut2 = self.cut_parser(args['cut_after_trim'])
+        cut3, cut4 = self.cut_parser(args['cut_after_rmdup'])
+
         ## update arguments for Cutadapt
         path_out = args.pop('path_out')
         fq1 = args.pop('fq1')
         adapter3 = args.pop('adapter3')
         len_min = args.pop('len_min')
+        len_min_cutadapt = sum([len_min, cut1, cut2, cut3, cut4])
         ## ignore cut-to-length
         cut_to_length = args.pop('cut_to_length') # save for further analysis
         args['cut_to_length'] = 0 # update
@@ -852,7 +846,11 @@ class Trimmer(object):
             return_trim = fq1
             count_trim = count_input
         else:
-            return_trim = Cutadapt(fq1, adapter3, path_cutadapt, len_min, **args).run()
+            return_trim = Cutadapt(
+                fq1, 
+                adapter3, 
+                path_cutadapt, 
+                len_min_cutadapt, **args).run()
             count_trim = fx_counter(return_trim)
 
         ## 2. cut N bases
@@ -965,12 +963,19 @@ class Trimmer(object):
         else:
             args_logger(args, args_file, True) # update arguments.txt
 
+        ## determine the len_min 
+        ## cut_after_trim
+        ## cut_after_rmdup
+        cut1, cut2 = self.cut_parser(args['cut_after_trim'])
+        cut3, cut4 = self.cut_parser(args['cut_after_rmdup'])
+
         ## update arguments for Cutadapt
         path_out = args.pop('path_out')
         fq1 = args.pop('fq1')
         fq2 = args.pop('fq2')
         adapter3 = args.pop('adapter3')
         len_min = args.pop('len_min')
+        len_min_cutadapt = sum([len_min, cut1, cut2, cut3, cut4]) #!!!!
         ## ignore cut-to-length
         cut_to_length = args.pop('cut_to_length') # save for further analysis
         args['cut_to_length'] = 0 # update
@@ -984,7 +989,12 @@ class Trimmer(object):
             return_trim = [fq1, fq2]
             count_trim = count_input
         else:
-            return_trim = Cutadapt(fq1, adapter3, path_cutadapt, len_min, fq2=fq2, **args).run()
+            return_trim = Cutadapt(
+                fq1, 
+                adapter3, 
+                path_cutadapt, 
+                len_min_cutadapt, 
+                fq2=fq2, **args).run()
             count_trim = fx_counter(return_trim[0])
 
         ## 2. cut N bases
@@ -995,8 +1005,8 @@ class Trimmer(object):
             count_cut1 = count_trim
         else:
             cut5, cut3 = self.cut_parser(args['cut_after_trim'])
-            [Fastx(i, path_cut1, **args).cut(cut_left=cut5, 
-                cut_right=cut3, len_min=len_min) for i in return_trim]
+            [Fastx(i, path_cut1, **args).cut(cut_left=cut5, cut_right=cut3, 
+                len_min=len_min, discard_tooshort=False) for i in return_trim]
             count_cut1 = fx_counter(return_cut1[0])
 
         ## 3. collapse
@@ -1017,8 +1027,8 @@ class Trimmer(object):
             count_cut2 = count_rmdup
         else:
             cut5, cut3 = self.cut_parser(args['cut_after_rmdup'])
-            [Fastx(i, path_cut2, **args).cut(cut_left=cut5, 
-                cut_right=cut3, len_min=len_min) for i in return_rmdup]
+            [Fastx(i, path_cut2, **args).cut(cut_left=cut5, cut_right=cut3, 
+                len_min=len_min, discard_tooshort=False) for i in return_rmdup]
             count_cut2 = fx_counter(return_cut2[0])
 
         ## 5. cut to length
@@ -1029,7 +1039,7 @@ class Trimmer(object):
             count_cut3 = count_cut2
         else:
             [Fastx(i, path_cut3, **args).cut(cut_to_length=cut_to_length,
-                len_min=len_min) for i in return_cut2]
+                len_min=len_min, discard_tooshort=False) for i in return_cut2]
             count_cut3 = fx_counter(return_cut3)
         
         ## 6. organize output
