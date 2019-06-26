@@ -56,6 +56,7 @@ class Alignment(object):
 
         ## create index
         args['index_list'] = AlignIndexBuilder(**args).get_index()
+        print(args['index_list'])
         self.fq1 = fq1
         self.fq2 = fq2
         self.path_out = path_out # original path_out
@@ -351,6 +352,7 @@ class AlignIndexBuilder(object):
                 index_group = [AlignIndex(index=args['te_index'], **args).get_index()]
             else:
                 index_group = [AlignIndex(align_to_te=True, **args).get_index()]
+
         # group3 - genome + spikein
         elif isinstance(args['genome'], str): # genome, required
             ## nested list
@@ -687,7 +689,68 @@ class AlignNode(object):
 
 
     def bowtie_pe(self):
-        pass
+        """Run bowtie for single file
+        args: fq, the fastq file
+        args: fq2, the mate of paired-end reads
+        args: index, the path to the aligner index
+        args: reference, the name of the index, keys of index_init
+        args: unique_map, booolen, 
+        args: align_path, None or str
+
+        arguments:
+        reference: genome, genome_rRNA, spikein, spikein_rRNA
+        """
+        args = self.args.copy()
+        bowtie_exe = which('bowtie')
+
+        # output
+        fq_prefix, map_bam, map_log, unmap_fq = self.align_init()
+
+        # determine parameters
+        n_map = args['n_map']
+        if n_map < 1:
+            n_map = 1 # default
+        if args['unique_only']:
+            para_unique = '-m 1'
+        else:
+            para_unique = '-v 2 -k %s' % n_map # default: 1
+
+        if seq_type(args['fq1']) == 'fasta':
+            para_fq = '-f'
+        else:
+            para_fq = '-q'
+
+        # unmap file prefix
+        unmap_list = unmap_fq[0].split('.')
+        del unmap_list[-2]
+        unmap_prefix = '.'.join(unmap_list)
+
+        # file exists
+        if os.path.exists(map_bam) and args['overwrite'] is False:
+            log.info('bam file exists: %s' % map_bam)
+        else:
+            cmd = '{} {} {} -p {} --mm --best --sam --no-unal '
+            cmd += '--un {} {} -1 {} -2 {} 2> {} | '
+            cmd += 'samtools view -Su -f 0x2 -@ {} - | '
+            cmd += 'samtools sort -@ {} -o {} -'
+            cmd = cmd.format(
+                bowtie_exe, 
+                para_fq,
+                para_unique,
+                args['threads'], 
+                unmap_prefix, 
+                args['index'], 
+                args['fq1'],
+                args['fq2'],
+                map_log,
+                args['threads'],
+                args['threads'],
+                map_bam)
+            run_shell_cmd(cmd)
+
+        # process log file
+        self.wrap_log(map_log)
+        return [map_bam, unmap_fq]
 
 
     def bowtie2_pe(self):
@@ -766,7 +829,85 @@ class AlignNode(object):
 
 
     def star_pe(self):
-        pass
+        """Run STAR for PE reads
+        args: fq, the fastq file
+        args: fq2, the mate of paired end reads
+        args: index, the path to the aligner index
+        args: reference, the name of the index, keys of index_init
+        args: unique_map, booolen, 
+        args: align_path, None or str
+
+        use '--outFilterMultimapNmax' to control uniquely mapped reads
+
+        # update 2019-03-21
+        since 99% of the reads do not map to Blumeria, STAR takes a lot of time trying to squeeze the reads into the wrong genome. The best solution is to make a combined genome of Barley and Blumeria, which will alloy mapping simultaneously to the two genomes, with the best alignments winning.
+        Another option (if you insist on mapping to Blumeria alone) is to reduce --seedPerWindowNmax to 20 or even smaller values. More discussion on it here: https://groups.google.com/d/msg/rna-star/hJL_DUtliCY/HtpiePlMBtYJ .
+        see: https://github.com/alexdobin/STAR/issues/329#issuecomment-334879474
+
+        """
+        args = self.args.copy()
+        star_exe = which('STAR')
+
+        # output directory
+        fq_prefix, map_bam, map_log, unmap_fq = self.align_init()
+
+        # determine parameters
+        n_map = args['n_map']
+        if n_map > 1:
+            n_map = n_map # n_map default: 0
+        else:
+            n_map = 10 # STAR default: 10
+        # small genome
+        seed_max = 50 # STAR default: 50
+        if args['small_genome']:
+            seed_max = 20 # even smaller
+
+        para_unique = '--outFilterMultimapNmax %s --seedPerWindowNmax %s' % (n_map, seed_max)
+
+        file_reader = 'zcat' if is_gz(args['fq1']) else '-'
+
+        # file exists
+        map_prefix = os.path.splitext(map_bam)[0]
+        if os.path.exists(map_bam) and args['overwrite'] is False:
+            log.info('bam file exists: %s' % map_bam)
+        else:
+            cmd = 'STAR --runMode alignReads --genomeDir {} --readFilesIn {} {} '
+            cmd += '--readFilesCommand {} --outFileNamePrefix {} --runThreadN {} '
+            cmd += '--outReadsUnmapped Fastx {} '
+            cmd += '{} ' # unique parameters
+            cmd += '--limitOutSAMoneReadBytes 1000000 '
+            cmd += '--genomeLoad NoSharedMemory '
+            cmd += '--limitBAMsortRAM 10000000000 '
+            cmd += '--outSAMtype BAM SortedByCoordinate '
+            cmd += '--outFilterMismatchNoverLmax 0.07 '
+            cmd += '--seedSearchStartLmax 20 '
+            cmd = cmd.format(
+                args['index'],
+                args['fq1'],
+                args['fq2'],
+                file_reader,
+                map_prefix,
+                args['threads'],
+                map_prefix,
+                para_unique)
+            p1 = subprocess.run(shlex.split(cmd))
+            # run_shell_cmd(cmd)
+
+            # filter unique mapped reads
+            if args['unique_only']: # only unique mapped reads, -q 10
+                pysam.view('-bhS', '-q', '10', '-@', str(args['threads']),
+                    '-o', map_bam, map_prefix + 'Aligned.sortedByCoord.out.bam',
+                    catch_stdout=False)
+            else:
+                os.rename(map_prefix + 'Aligned.sortedByCoord.out.bam', map_bam)
+            os.rename(map_prefix + 'Unmapped.out.mate1', unmap_fq[0])
+            os.rename(map_prefix + 'Unmapped.out.mate2', unmap_fq[1])
+            shutil.copyfile(map_prefix + 'Log.final.out', map_log)
+
+        # process log file
+        self.wrap_log(map_log)
+        return [map_bam, unmap_fq]
+
 
 
     def get_prefix(self):
@@ -917,7 +1058,7 @@ class AlignHub(object):
             if self.dry_run: # do not run alignment
                 pass
             else:
-                if not os.path.exists(x_bam) or not os.path.exists(x_unmap) or args['overwrite']:
+                if not os.path.exists(x_bam) or not os.path.exists(x_unmap[0]) or args['overwrite']:
                     x_bam, x_unmap = AlignNode(**args).run()
 
             ## update arguments
