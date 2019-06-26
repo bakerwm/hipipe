@@ -101,20 +101,37 @@ from alignment import Alignment, Alignment_log, Alignment_stat
 from hipipe_reporter import QC_reporter, Alignment_reporter
 
 
+logging.basicConfig(
+    format='[%(asctime)s %(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    stream=sys.stdout)
+log = logging.getLogger(__name__)
+
+
 def get_args():
     parser = argparse.ArgumentParser(prog='RNAseq-pipeline', 
                                      description='DEseq analysis')
-    parser.add_argument('-c', nargs='+', required=True, metavar='control_fq',
+    parser.add_argument('-c1', nargs='+', required=True, metavar='control_fq',
         help='FASTQ files of Control sample replicates')
-    parser.add_argument('-t', nargs='+', required=True, metavar='treatment_fq',
+    parser.add_argument('-t1', nargs='+', required=True, metavar='treatment_fq',
         help='FASTQ files of Treatment sample, replicates')
+    parser.add_argument('-c2', nargs='+', required=False, metavar='control_fq_2',
+        default=None,
+        help='the mate of paired-end reads for Control sample')
+    parser.add_argument('-t2', nargs='+', required=False, metavar='treatment_fq_2',
+        default=None,
+        help='the mate of paired-end reads for Treatment sample')
     parser.add_argument('-o', '--path-out', default=None, dest='path_out',
         help='The directory to save results, default: [cwd]')
-    parser.add_argument('-g', '--genome', required=True, default='hg19', 
-        choices=['dm3', 'hg19', 'hg38', 'mm10', 'mm9'],
-        help='Reference genome : dm3, hg19, hg39, mm10, default: hg19')
+    parser.add_argument('-C', metavar='Control_NAME', default=None,
+        help='Name control samples')
+    parser.add_argument('-T', metavar='Treatment_NAME', default=None,
+        help='Name control samples')
+    parser.add_argument('-g', '--genome', required=True, default='dm6', 
+        choices=['dm3', 'dm6', 'hg19', 'hg38', 'mm9', 'mm10'],
+        help='Reference genome : dm3, dm6, hg19, hg39, mm10, default: dm6')
     parser.add_argument('-k', '--spikein', default=None, 
-        choices=[None, 'dm3', 'hg19', 'hg38', 'mm10'],
+        choices=[None, 'dm3', 'dm6', 'hg19', 'hg38', 'mm9', 'mm10'],
         help='Spike-in genome : dm3, hg19, hg38, mm10, default: None')
     parser.add_argument('--align-to-te', action='store_true',
         dest='align_to_te', help='if spcified, align reads to TE')
@@ -127,15 +144,14 @@ def get_args():
         indexes. eg. Transposon, tRNA, rRNA and so on.')
     parser.add_argument('--gtf', default=None,
         help='genome annotation file in GTF format, from ensembl')
-    parser.add_argument('-C', metavar='Control_NAME', default=None,
-        help='Name control samples')
-    parser.add_argument('-T', metavar='Treatment_NAME', default=None,
-        help='Name control samples')
+    parser.add_argument('--include-multi-reads', action='store_true', 
+        dest='include_multi_reads',
+        help='if specified, including multi-mapped reads for further analysis')
     parser.add_argument('-p', '--threads', type=int, default=8,
         help='Number of threads to use, default: 8')
     parser.add_argument('-s', metavar='strandness', type=int,
-        default=1, choices=[0, 1, 2],
-        help='strandness, 1=sens, 2=anti, 0=ignore, default:1\
+        default=2, choices=[0, 1, 2],
+        help='strandness, for NSR, dUTP: 1=anti, 2=sens, 0=ignore, default:2\
         This is for featureCounts, dUTP strand-specific mode, \
         read2 is sense strand.')
     parser.add_argument('--library-type', default='fr-firststrand',
@@ -151,9 +167,9 @@ def get_args():
         coordinates) is the first sequenced (or only sequenced for single-end reads). \
         Equivalently, it is assumed that only the strand generated during second \
         strand synthesis is sequenced.')
-    parser.add_argument('--aligner', default='bowtie', 
+    parser.add_argument('--aligner', default='STAR', 
         choices=['bowtie', 'bowtie2', 'STAR'],
-        help='Choose which aligner to use. default: bowtie')
+        help='Choose which aligner to use. default: STAR')
     parser.add_argument('--bin-size', dest='bin_size', metavar='binsize', 
         type=int, default=50,
         help='binsize of bigWig, default: 50')
@@ -162,7 +178,14 @@ def get_args():
         [$HOME/data/genome/]')
     parser.add_argument('--overwrite', action='store_true',
         help='if spcified, overwrite exists file')
+    parser.add_argument('--log-level', default='INFO', dest='log_level',
+                        choices=['NOTSET','DEBUG','INFO',
+                            'WARNING','CRITICAL','ERROR','CRITICAL'],
+                        help='Log level')
     args = parser.parse_args()
+    log.setLevel(args.log_level)
+    log.info(sys.argv)
+
     return args
 
 
@@ -211,42 +234,111 @@ def init_rnaseq_project(x, analysis_type=1):
     return out_dict
 
 
-def run_shell_cmd(cmd, log):
-    try:
-        p = subprocess.Popen(cmd, shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True,
-            preexec_fn=os.setsid)
-        pid = p.pid
-        pgid = os.getpgid(pid)
-        logging.info('run_shell_cmd: PID={}, CMD={}'.format(pid, cmd))
-        ret = ''
-        while True:
-            line = p.stdout.readline()
-            if line=='' and p.poll() is not None:
-                break
-            # logging.debug('PID={}: {}'.format(pid,line.strip('\n')))
-            # save log
-            with open(log, 'wt') as fo:
-                if line:
-                    print('PID={}: {}'.format(pid,line.strip('\n')))
-                    fo.write(line)
-                    ret += line
-        p.communicate() # wait here
-        if p.returncode > 0:
-            raise subprocess.CalledProcessError(
-                p.returncode, cmd)
-        return ret.strip('\n')
-    except:
-        # kill all child processes
-        try:
-            os.killpg(pgid, signal.SIGKILL)
-            p.terminate()
-        except:
-            pass
-        raise Exception('Killed PID={}, PGID={}\nCMD={}\nSTDOUT={}'.format(
-            pid, pgid, cmd, ret))
+# def run_shell_cmd(cmd, log):
+#     try:
+#         p = subprocess.Popen(cmd, shell=True,
+#             stdout=subprocess.PIPE,
+#             stderr=subprocess.STDOUT,
+#             universal_newlines=True,
+#             preexec_fn=os.setsid)
+#         pid = p.pid
+#         pgid = os.getpgid(pid)
+#         log.info('run_shell_cmd: PID={}, CMD={}'.format(pid, cmd))
+#         ret = ''
+#         while True:
+#             line = p.stdout.readline()
+#             if line=='' and p.poll() is not None:
+#                 break
+#             # log.debug('PID={}: {}'.format(pid,line.strip('\n')))
+#             # save log
+#             with open(log, 'wt') as fo:
+#                 if line:
+#                     print('PID={}: {}'.format(pid,line.strip('\n')))
+#                     fo.write(line)
+#                     ret += line
+#         p.communicate() # wait here
+#         if p.returncode > 0:
+#             raise subprocess.CalledProcessError(
+#                 p.returncode, cmd)
+#         return ret.strip('\n')
+#     except:
+#         # kill all child processes
+#         try:
+#             os.killpg(pgid, signal.SIGKILL)
+#             p.terminate()
+#         except:
+#             pass
+#         raise Exception('Killed PID={}, PGID={}\nCMD={}\nSTDOUT={}'.format(
+#             pid, pgid, cmd, ret))
+
+
+class fc(object):
+    """Parsing the output of featureCounts
+    :strandness
+    :assigned%, warning if <60%
+    """
+
+    def __init__(self, x):
+        """Input the .txt output of featureCounts
+        Including *.summary in the same directory
+        """
+        self.txt = x
+        self.summary = x + '.summary'
+        if not os.path.exists(self.summary):
+            log.warning('summary file not exists: {}'.format(self.summary))
+
+
+    def assign(self):
+        """Parsing the summary file for assign%
+        warning if assign% < 60%
+        """
+        df = pd.read_csv(self.summary, '\t', index_col=0)
+        df.columns = [os.path.basename(i) for i in df.columns.tolist()]
+        ## total
+        total = df.sum(axis=0, skipna=True)
+        ## assign
+        assign = df.loc['Assigned', ] / total * 100
+        ## pct
+        assign_df = assign.to_frame('assigned%')
+        ## minimum
+        min_pct = assign.min()
+        if assign.min() < 60:
+            log.warning('!!!! most of the reads are not assigned, Visual checking recommended !!!!')
+
+        return assign_df
+
+    def command(self):
+        """Parsing the command line from .txt output
+        :1-st line in file
+
+        ## example
+        # Program:featureCounts v1.6.1; Command:"featureCounts" "-M" "-O" 
+        "--fraction" "-a" "dm3.ensembl.gtf" "-s" "2" "-p" "-C" "-B" 
+        "-o" "count.txt" "bam1" "bam2"
+        """
+        with open(self.x, 'rt') as fi:
+            line = next(fi) # the first line
+
+        version, cmd_line = line.strip().split(';')
+        version = version.split(' ')[2]
+        cmd_line = re.sub('"', '', cmd_line.strip())
+
+        return [version, cmd_line]
+
+
+    def bam_files(self):
+        """Parsing the bam files from summary
+        the first line
+        """
+        with open(self.summary, 'rt') as fi:
+            line = next(fi) # the first line
+
+        bam_files = line.strip().split(' ')
+        bam_files = [os.path.basename(i) for i in bam_files]
+        # remove the 1-st item (Status)
+        bam_files.pop(0)
+
+        return bam_files
 
 
 def run_featureCounts(gtf, bam_files, out, strandness=0, 
@@ -256,12 +348,15 @@ def run_featureCounts(gtf, bam_files, out, strandness=0,
     bam, one or multiple alignemnt in BAM format
     out, count.txt
     featureCounts -M -O --fraction -T <cpu> -a <gtf> -s <0|1|2> <out.txt> bam.files
+
+    ## paired-end options
+    -p -C
     """
     ## init
     assert os.path.exists(gtf)
     assert isinstance(bam_files, list)
     assert isinstance(threads, int)
-    logging.info('running featureCounts')
+    log.info('running featureCounts')
     fc_exe = which('featureCounts')
     if fc_exe is None:
         raise Exception('featureCounts, not found in your $PATH')
@@ -278,23 +373,48 @@ def run_featureCounts(gtf, bam_files, out, strandness=0,
         for b in bam_prefix:
             fo.write(b + '\n')
 
+    ## check BAM is PE or SE
+    pe_num = pysam.view('-c', '-f', '1', bam_files[0], catch_stdout=True)
+    pe_num = int(pe_num)
+    if pe_num > 0:
+        pe_flag = True
+    else:
+        pe_flag = False
+
     ## prepare command
     bam_line = ' '.join(bam_files)
-    fc_cmd = '%s -M -O --fraction -g gene_id -t exon -T %s -a %s -s %s \
-        -o %s %s' % (fc_exe, threads, gtf, strandness, out, bam_line)
     fc_log = os.path.splitext(out)[0] + '.featureCounts.log'
+    cmd = '{} -s {} -T {} '
+    if pe_flag:
+        cmd += '-p -C -B '
+    cmd += '-M -O --fraction -g gene_id -t exon '
+    cmd += '-a {} '
+    cmd += '-o {} {} 2> {}'
+    cmd = cmd.format(
+        fc_exe,
+        strandness,
+        threads,
+        gtf,        
+        out,
+        bam_line,
+        fc_log)
 
     if os.path.exists(out) and overwrite is False:
-        logging.info('file exists: %s' % out)
+        log.info('featureCounts skipped, file exists: {}'.format(out))
     else:
-        run_shell_cmd(fc_cmd, fc_log)
+        run_shell_cmd(cmd)
 
         if not os.path.exists(out):
-            raise Exception('featureCounts output not correct: %s' % out)
+            raise Exception('featureCounts failed, file not found: {}'.format(out))
+
+    # check output
+    df_assign = fc(out).assign()
+    log.info(df_assign)
+
     return out
 
 
-def gene_aligner(fq_files, smp_name, args):
+def gene_aligner(fq1_files, smp_name, args, fq2_files=None):
     """Mapping reads to genome
     control or treatment
     args dict, the arguments of pipeline
@@ -309,16 +429,18 @@ def gene_aligner(fq_files, smp_name, args):
 
     ## qc-report
     qc_path = os.path.join(gene_align_path['report'], 'qc')
-    QC_reporter(fq_files, qc_path).run()
+    # QC_reporter(fq1_files, qc_path).run()
 
     ## update args
-    args['fq1'] = fq_files
+    args['fq1'] = fq1_files
+    args['fq2'] = fq2_files
     args['path_out'] = gene_align_path['mapping']
     args['smp_name'] = smp_name
     args['align_to_te'] = False
 
     ## run alignment
     map_bam_list = Alignment(**args).run()
+    # sys.exit('AAAA')
 
     ## filt map_genome
     map_bam = []
@@ -340,7 +462,7 @@ def gene_aligner(fq_files, smp_name, args):
     return map_bam
 
 
-def te_aligner(fq_files, smp_name, args):
+def te_aligner(fq1_files, smp_name, args, fq2_files=None):
     """Mapping reads to genome
     control or treatment
     args dict, the arguments of pipeline
@@ -355,12 +477,13 @@ def te_aligner(fq_files, smp_name, args):
 
     args['extra_index'] = None # pre-build
 
-    ## qc-report
-    qc_path = os.path.join(te_align_path['report'], 'qc')
-    QC_reporter(fq_files, qc_path).run()
+    # ## qc-report
+    # qc_path = os.path.join(te_align_path['report'], 'qc')
+    # QC_reporter(fq1_files, qc_path).run() ## skip, run in gene_aligner
 
     ## update args
-    args['fq1'] = fq_files
+    args['fq1'] = fq1_files
+    args['fq2'] = fq2_files
     args['path_out'] = te_align_path['mapping']
     args['smp_name'] = smp_name
     args['align_to_te'] = True
@@ -379,23 +502,10 @@ def te_aligner(fq_files, smp_name, args):
             binsize=args['bin_size'],
             overwrite=args['overwrite'])
 
-    # ## count
-    # count_path = te_align_path['count']
-    # count_file = os.path.join(count_path, 'count.txt')
-    # ## only for replicates
-    # rep_bam = [f for f in map_bam if '_rep' in f.lower()]
-    # run_featureCounts(
-    #     gtf=args['gtf'], 
-    #     bam_files=rep_bam, 
-    #     out=count_file, 
-    #     strandness=args['s'], 
-    #     threads=args['threads'], 
-    #     overwrite=args['overwrite'])
-
     return map_bam
 
 
-def extra_aligner(fq_files, smp_name, args):
+def extra_aligner(fq1_files, smp_name, args, fq2_files=None):
     """Mapping reads to genome
     control or treatment
     args dict, the arguments of pipeline
@@ -410,10 +520,11 @@ def extra_aligner(fq_files, smp_name, args):
 
     ## qc-report
     qc_path = os.path.join(extra_align_path['report'], 'qc')
-    # QC_reporter(fq_files, qc_path).run()
+    # QC_reporter(fq1_files, qc_path).run()
 
     ## update args
-    args['fq1'] = fq_files
+    args['fq1'] = fq1_files
+    args['fq2'] = fq2_files
     args['path_out'] = extra_align_path['mapping']
     args['smp_name'] = smp_name
     args['align_to_te'] = False
@@ -426,7 +537,7 @@ def extra_aligner(fq_files, smp_name, args):
 
 
 def deseq2_exe(control, treatment, path_out, genome, nameA=None, 
-    nameB=None, group='gene', pvalue=0.05):
+    nameB=None, group='gene', pvalue=0.05, path_suffix=None):
     """Run DESeq2 witb count.txt matrix input
     control str, featureCounts output
     treatment str, featureCounts output
@@ -434,6 +545,7 @@ def deseq2_exe(control, treatment, path_out, genome, nameA=None,
     group str, gene|transposon|extra_genes
     using custom R script
     """
+    log.info('running DESeq2 analysis')
     project_path = init_rnaseq_project(path_out, analysis_type=2) # 1=mapping, 2=de
     de_path = project_path[group] # gene|transposon|extra_genes
     
@@ -446,11 +558,284 @@ def deseq2_exe(control, treatment, path_out, genome, nameA=None,
         raise Exception('R script not found: %s' % deseq2_script)
 
     deseq2_path = de_path['de_analysis']
+    if isinstance(path_suffix, str):
+        deseq2_path += '_' + path_suffix
+    is_path(deseq2_path) # create path
     deseq2_log = os.path.join(deseq2_path, 'run_DESeq2.log')
 
-    deseq2_cmd = ' '.join([Rscript_exe, deseq2_script, 
+    cmd = ' '.join([Rscript_exe, deseq2_script, 
         control, treatment, genome, deseq2_path, nameA, nameB, str(pvalue)])
-    run_shell_cmd(deseq2_cmd, deseq2_log)
+    cmd += ' > {}'.format(deseq2_log)
+    run_shell_cmd(cmd)
+
+
+def gene_rnaseq(args):
+    """RNAseq pipeline analysis for genes
+    require, gtf, bam, ...
+    """
+    log.info('running for genes')
+
+    group = 'gene' # !!!!
+
+    ###########################
+    ## sense strand analysis ##
+    ###########################
+    ## control, args['c1']
+    ctl_args = args.copy()
+    ctl_args['align_to_te'] = False # required !!!!
+    ctl_args['extra_index'] = None # required !!!!
+    ctl_args['path_out'] = os.path.join(args['path_out'], args['C'])
+    ctl_bam = gene_aligner(args['c1'], args['C'], ctl_args, args['c2'])
+    ## count reads
+    ctl_count = os.path.join(args['path_out'], args['C'], group, 'count', 'count.sens.txt')
+    run_featureCounts(
+        gtf=args['gtf'],
+        bam_files=ctl_bam,
+        out=ctl_count,
+        strandness=args['s'],
+        threads=args['threads'], 
+        overwrite=args['overwrite'])
+
+    ## treatment, args['t1']
+    tre_args = args.copy()
+    tre_args['align_to_te'] = False # required !!!!
+    tre_args['extra_index'] = None # required !!!!
+    tre_args['path_out'] = os.path.join(args['path_out'], args['T'])
+    tre_bam = gene_aligner(args['t1'], args['T'], tre_args, args['t2'])
+    ## count reads
+    tre_count = os.path.join(args['path_out'], args['T'], 'gene', 'count', 'count.sens.txt')
+    run_featureCounts(
+        gtf=args['gtf'], 
+        bam_files=tre_bam, 
+        out=tre_count, 
+        strandness=args['s'], 
+        threads=args['threads'], 
+        overwrite=args['overwrite'])
+
+    ## de analysis using DESeq2
+    de_path = os.path.join(args['path_out'], args['C'] + '.vs.' + args['T'])
+    deseq2_exe(
+        control=ctl_count, 
+        treatment=tre_count, 
+        path_out=de_path, 
+        genome=args['genome'], 
+        nameA=args['C'], 
+        nameB=args['T'], 
+        group=group,
+        path_suffix='sense')
+
+    ###############################
+    ## antisense strand analysis ##
+    ###############################
+    # determine the strandness
+    if args['s'] == 2:
+        args['anti_strand'] = 1
+    elif args['s'] == 1:
+        args['anti_strand'] = 2
+    else:
+        args['anti_strand'] = 0
+
+    ## count reads
+    ctl_count = os.path.join(args['path_out'], args['C'], group, 'count', 'count.anti.txt')
+    run_featureCounts(
+        gtf=args['gtf'], 
+        bam_files=ctl_bam, 
+        out=ctl_count, 
+        strandness=args['anti_strand'], 
+        threads=args['threads'], 
+        overwrite=args['overwrite'])
+
+    ## count reads
+    tre_count = os.path.join(args['path_out'], args['T'], group, 'count', 'count.anti.txt')
+    run_featureCounts(
+        gtf=args['gtf'], 
+        bam_files=tre_bam, 
+        out=tre_count, 
+        strandness=args['anti_strand'], 
+        threads=args['threads'], 
+        overwrite=args['overwrite'])
+
+    ## de analysis using DESeq2
+    de_path = os.path.join(args['path_out'], args['C'] + '.vs.' + args['T'])
+    deseq2_exe(
+        control=ctl_count, 
+        treatment=tre_count, 
+        path_out=de_path, 
+        genome=args['genome'], 
+        nameA=args['C'], 
+        nameB=args['T'], 
+        group=group,
+        path_suffix='antisense')    
+
+
+def te_rnaseq(args):
+    """RNAseq pipeline analysis for Transposon, (only support dm3)
+    require, gtf, bam, ...
+    """
+    log.info('running for transposon')
+    group = 'transposon' # !!!! only for dm3
+    ## args
+    ## update gtf
+    #  args['gtf'] = Genome(args['genome']).te_gtf()
+    ## !!!! only for dm3
+    ## !!!! require: --te-gtf, --te-index
+    if args['genome'] in ['dm3']:
+        args['gtf'] = '/home/wangming/data/genome/dm3/FL10B/FL10B_and_transposon/FL10B_transposon.gtf'
+    # elif args['genome'] in ['dm6']:
+    #    args['gtf'] = '/home/wangming/data/genome/dm6/FL10B/FL10B_and_transposon/FL10B_transposon.gtf'
+    else:
+        args['gtf'] = Genome(args['genome']).te_gtf()
+
+
+    if args['gtf'] is None or not os.path.exists(args['gtf']):
+        log.warning('transposon analysis skipped, gtf not exists: {}'.format(args['gtf']))
+        return None
+
+    ###########################
+    ## sense strand analysis ##
+    ###########################
+    ## control, args['c1']
+    ctl_args = args.copy()
+    ctl_args['align_to_te'] = True # required !!!!
+    ctl_args['extra_index'] = None # required !!!!
+    ctl_args['path_out'] = os.path.join(args['path_out'], args['C'])    
+    ctl_bam = te_aligner(args['c1'], args['C'], ctl_args, args['c2'])
+    ## count reads
+    ctl_count = os.path.join(args['path_out'], args['C'], group, 'count', 'count.sens.txt')
+    run_featureCounts(
+        gtf=args['gtf'], 
+        bam_files=ctl_bam, 
+        out=ctl_count, 
+        strandness=args['s'], 
+        threads=args['threads'], 
+        overwrite=args['overwrite'])
+
+    ## treatment, args['t1']
+    tre_args = args.copy()
+    ctl_args['align_to_te'] = True # required !!!!
+    ctl_args['extra_index'] = None # required !!!!
+    tre_args['path_out'] = os.path.join(args['path_out'], args['T'])
+    tre_bam = te_aligner(args['t1'], args['T'], tre_args, args['t2'])
+    ## count reads
+    tre_count = os.path.join(args['path_out'], args['T'], group, 'count', 'count.sens.txt')
+    run_featureCounts(
+        gtf=args['gtf'], 
+        bam_files=tre_bam, 
+        out=tre_count, 
+        strandness=args['s'], 
+        threads=args['threads'], 
+        overwrite=args['overwrite'])
+
+    ## de analysis using DESeq2
+    de_path = os.path.join(args['path_out'], args['C'] + '.vs.' + args['T'])
+    deseq2_exe(
+        control=ctl_count, 
+        treatment=tre_count, 
+        path_out=de_path, 
+        genome=args['genome'], 
+        nameA=args['C'], 
+        nameB=args['T'], 
+        group=group,
+        path_suffix='sense')
+
+
+    ###############################
+    ## antisense strand analysis ##
+    ###############################
+    # determine the strandness
+    if args['s'] == 2:
+        args['anti_strand'] = 1
+    elif args['s'] == 1:
+        args['anti_strand'] = 2
+    else:
+        args['anti_strand'] = 0
+
+    ## count reads
+    ctl_count = os.path.join(args['path_out'], args['C'], group, 'count', 'count.anti.txt')
+    run_featureCounts(
+        gtf=args['gtf'], 
+        bam_files=ctl_bam, 
+        out=ctl_count, 
+        strandness=args['anti_strand'], 
+        threads=args['threads'], 
+        overwrite=args['overwrite'])
+
+    ## count reads
+    tre_count = os.path.join(args['path_out'], args['T'], group, 'count', 'count.anti.txt')
+    run_featureCounts(
+        gtf=args['gtf'], 
+        bam_files=tre_bam, 
+        out=tre_count, 
+        strandness=args['anti_strand'], 
+        threads=args['threads'], 
+        overwrite=args['overwrite'])
+
+    ## de analysis using DESeq2
+    de_path = os.path.join(args['path_out'], args['C'] + '.vs.' + args['T'])
+    deseq2_exe(
+        control=ctl_count, 
+        treatment=tre_count, 
+        path_out=de_path, 
+        genome=args['genome'], 
+        nameA=args['C'], 
+        nameB=args['T'], 
+        group=group,
+        path_suffix='antisense')
+
+
+def extra_rnaseq(args, gtf):
+    """RNAseq pipeline analysis for extra sequences
+    require gtf, bam, ...
+    """
+    log.info('running for other reference')
+    group = 'extra'
+    ## update gtf
+    args['gtf'] = gtf
+
+    ## check if extra_index exists
+    if args['extra_index'] is None:
+        log.warning('extra analysis skipped, index not exists: {}'.format(args['gtf']))
+    elif not os.path.exists(gtf):
+        log.warning('extra analysis skipped, gtf file not exists: {}'.foramt(gtf))
+    else:
+        ## control, args['c1']
+        ctl_args = args.copy()
+        ctl_args['path_out'] = os.path.join(args['path_out'], args['C'])    
+        mapping_te(args['c1'], args['C'], ctl_args)
+        ## count reads
+        ctl_count = os.path.join(args['path_out'], args['C'], group, 'count', 'count.txt')
+        run_featureCounts(
+            gtf=args['gtf'], 
+            bam_files=ctl_bam, 
+            out=ctl_count, 
+            strandness=args['s'], 
+            threads=args['threads'], 
+            overwrite=args['overwrite'])
+
+        ## treatment, args['t1']
+        tre_args = args.copy()
+        tre_args['path_out'] = os.path.join(args['path_out'], args['T'])
+        mapping_te(args['t1'], args['T'], tre_args)
+        ## count reads
+        tre_count = os.path.join(args['path_out'], args['T'], group, 'count', 'count.txt')
+        run_featureCounts(
+            gtf=args['gtf'], 
+            bam_files=tre_bam, 
+            out=tre_count, 
+            strandness=args['s'], 
+            threads=args['threads'], 
+            overwrite=args['overwrite'])
+
+        ## de analysis using DESeq2
+        de_path = os.path.join(args['path_out'], args['C'] + '_vs_' + args['T'])
+        deseq2_exe(
+            control=ctl_count, 
+            treatment=tre_count, 
+            path_out=de_path, 
+            genome=args['genome'], 
+            nameA=args['C'], 
+            nameB=args['T'], 
+            group=group)
 
 
 def map_stat(path):
@@ -483,137 +868,32 @@ def map_stat(path):
         return None
 
 
-def gene_rnaseq(args):
-    """RNAseq pipeline analysis for genes
-    require, gtf, bam, ...
-    """
-    group = 'gene' # !!!!
-    ## control, args['c']
-    ctl_args = args.copy()
-    ctl_args['align_to_te'] = False # required !!!!
-    ctl_args['extra_index'] = None # required !!!!
-    ctl_args['path_out'] = os.path.join(args['path_out'], args['C'])
-    ctl_bam = gene_aligner(args['c'], args['C'], ctl_args)   
-    ## count reads
-    ctl_count = os.path.join(args['path_out'], args['C'], group, 'count', 'count.txt')
-    run_featureCounts(args['gtf'], ctl_bam, ctl_count, strandness=args['s'],
-        threads=args['threads'], overwrite=args['overwrite'])
-
-    ## treatment, args['t']
-    tre_args = args.copy()
-    tre_args['align_to_te'] = False # required !!!!
-    tre_args['extra_index'] = None # required !!!!
-    tre_args['path_out'] = os.path.join(args['path_out'], args['T'])
-    tre_bam = gene_aligner(args['t'], args['T'], tre_args)
-    ## count reads
-    tre_count = os.path.join(args['path_out'], args['T'], 'gene', 'count', 'count.txt')
-    run_featureCounts(args['gtf'], tre_bam, tre_count, strandness=args['s'], 
-        threads=args['threads'], overwrite=args['overwrite'])
-
-    ## de analysis using DESeq2
-    de_path = os.path.join(args['path_out'], args['C'] + '.vs.' + args['T'])
-    deseq2_exe(ctl_count, tre_count, de_path, args['genome'], nameA=args['C'], 
-         nameB=args['T'], group=group)
-
-
-def te_rnaseq(args):
-    """RNAseq pipeline analysis for Transposon, (only support dm3)
-    require, gtf, bam, ...
-    """
-    group = 'transposon' # !!!! only for dm3
-    ## args
-    ## update gtf
-    args['gtf'] = Genome(args['genome']).te_gtf()
-    ## !!!! only for dm3
-    ## !!!! require: --te-gtf, --te-index
-    args['gtf'] = '/home/wangming/data/genome/dm3/FL10B/FL10B_and_transposon/FL10B_transposon.gtf'
-
-    if not os.path.exists(args['gtf']):
-        logging.warning('gtf not exists: %s' % args['gtf'])
-    else:
-        ## control, args['c']
-        ctl_args = args.copy()
-        ctl_args['align_to_te'] = True # required !!!!
-        ctl_args['extra_index'] = None # required !!!!
-        ctl_args['path_out'] = os.path.join(args['path_out'], args['C'])    
-        ctl_bam = te_aligner(args['c'], args['C'], ctl_args)
-        ## count reads
-        ctl_count = os.path.join(args['path_out'], args['C'], group, 'count', 'count.txt')
-        run_featureCounts(args['gtf'], ctl_bam, ctl_count, strandness=args['s'], 
-            threads=args['threads'], overwrite=args['overwrite'])
-
-        ## treatment, args['t']
-        tre_args = args.copy()
-        ctl_args['align_to_te'] = True # required !!!!
-        ctl_args['extra_index'] = None # required !!!!
-        tre_args['path_out'] = os.path.join(args['path_out'], args['T'])
-        tre_bam = te_aligner(args['t'], args['T'], tre_args)
-        ## count reads
-        tre_count = os.path.join(args['path_out'], args['T'], group, 'count', 'count.txt')
-        run_featureCounts(args['gtf'], tre_bam, tre_count, strandness=args['s'], 
-            threads=args['threads'], overwrite=args['overwrite'])
-
-        ## de analysis using DESeq2
-        de_path = os.path.join(args['path_out'], args['C'] + '.vs.' + args['T'])
-        deseq2_exe(ctl_count, tre_count, de_path, args['genome'], nameA=args['C'], 
-            nameB=args['T'], group=group)
-
-
-def extra_rnaseq(args, gtf):
-    """RNAseq pipeline analysis for extra sequences
-    require gtf, bam, ...
-    """
-    group = 'extra'
-    ## update gtf
-    args['gtf'] = gtf
-
-    ## check if extra_index exists
-    if args['extra_index'] is None:
-        logging.warning('extra_index not exists')
-    elif not os.path.exists(gtf):
-        logging.warning('gtf file not exists: %s' % gtf)
-    else:
-        ## control, args['c']
-        ctl_args = args.copy()
-        ctl_args['path_out'] = os.path.join(args['path_out'], args['C'])    
-        mapping_te(args['c'], args['C'], ctl_args)
-        ## count reads
-        ctl_count = os.path.join(args['path_out'], args['C'], group, 'count', 'count.txt')
-        run_featureCounts(args['gtf'], ctl_bam, ctl_count, strandness=1, 
-            threads=args['threads'], overwrite=args['overwrite'])
-
-        ## treatment, args['t']
-        tre_args = args.copy()
-        tre_args['path_out'] = os.path.join(args['path_out'], args['T'])
-        mapping_te(args['t'], args['T'], tre_args)
-        ## count reads
-        tre_count = os.path.join(args['path_out'], args['T'], group, 'count', 'count.txt')
-        run_featureCounts(args['gtf'], tre_bam, tre_count, strandness=1, 
-            threads=args['threads'], overwrite=args['overwrite'])
-
-        ## de analysis using DESeq2
-        de_path = os.path.join(args['path_out'], args['C'] + '_vs_' + args['T'])
-        deseq2_exe(ctl_count, tre_count, de_path, args['genome'], nameA=args['C'], 
-            nameB=args['T'], group=group)
-
-
 def main():
     """Main for RNAseq analysis pipeline"""
     args = args_init(vars(get_args()), align=True)
 
+    log.info('running RNAseq pipeline')
+
     ## default arguments, for RNAseq2 only
-    args['unique_only'] = True
     args['align_to_rRNA'] = True
+
+    ## multireads should not be discarded
+    ## https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4728800/
+    ## Genome Biology, 2016
+    if args['include_multi_reads']:
+        args['unique_only'] = False #  
+    else:
+        args['unique_only'] = True # default    
 
     if args['gtf'] is None:
         args['gtf'] = Genome(**args).gene_gtf('ensembl')
 
     ## update prefix
-    ctl_prefix = str_common([os.path.basename(f) for f in args['c']])
+    ctl_prefix = str_common([os.path.basename(f) for f in args['c1']])
     ctl_prefix = ctl_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
     if args['C'] is None:
         args['C'] = ctl_prefix
-    tre_prefix = str_common([os.path.basename(f) for f in args['t']])
+    tre_prefix = str_common([os.path.basename(f) for f in args['t1']])
     tre_prefix = tre_prefix.rstrip('r|R|rep|Rep').rstrip('_|.')
     if args['T'] is None:
         args['T'] = tre_prefix
@@ -626,43 +906,14 @@ def main():
     if args['align_to_te']:
         te_rnaseq(args)
 
+    ## extra
+    if args['extra_index']:
+        extra_rnaseq(args)
+
+    log.info('finish')
 
 if __name__ == '__main__':
     main()
 
 
 # EOF
-
-
-# def counting_gene(bam, gtf, path_out, threads=4, overwrite=True):
-#     """Count gene using featureCount"""
-#     # ## count
-#     # count_path = mapping_gene_path['count']
-#     # count_file = os.path.join(count_path, 'count.txt')
-
-#     # ## count BAM 
-#     # ## only for replicates
-#     # rep_bam = [f for f in map_bam if '_rep' in f.lower()]
-#     # run_featureCounts(
-#     #     gtf=args['gtf'], 
-#     #     bam_files=rep_bam, 
-#     #     out=count_file, 
-#     #     strandness=args['s'], 
-#     #     threads=args['threads'], 
-#     #     overwrite=args['overwrite'])
-
-#     # check BAM index
-
-#     # output file
-#     count_file = os.path.join(path_out, 'count.txt')
-
-#     # run featureCounts
-#     run_featureCounts(
-#         gtf=gtf, 
-#         bam_files=bam, 
-#         out=count_file, 
-#         threads=threads, 
-#         overwrite=overwrite)
-
-#     # return
-#     return count_file
