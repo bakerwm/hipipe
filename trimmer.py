@@ -808,8 +808,8 @@ class Trimmer(object):
         fq1_prefix = file_prefix(args['fq1'])[0]
         fx_type = seq_type(args['fq1'])
         return_output_name = fq1_prefix + '.' + fx_type
-        if args['gzip']:
-            return_output_name += '.gz'
+        # if args['gzip']:
+        #     return_output_name += '.gz'
         return_output = os.path.join(args['path_out'], return_output_name)
 
         ## save arguments
@@ -841,6 +841,8 @@ class Trimmer(object):
         count_input = fx_counter(fq1)
 
         ## 1. trim adapter
+        ## do not compress files
+        args['gzip'] = False
         path_cutadapt = os.path.join(path_out, '1_trim_adapter')
         if args['not_trim_adapter']:
             return_trim = fq1
@@ -925,6 +927,14 @@ class Trimmer(object):
             fo.write('%13s : %10d : %6.2f%%\n' % ('cut_to_length', n_cut3, n_cut3 / count_input * 100))
             fo.write('%13s : %10d : %6.2f%%\n' % ('output', count_cut3, count_cut3 / count_input * 100))
 
+        ## 7. compress output file
+        if self.kwargs['gzip']:
+            cmd = 'gzip {} {}'.format(
+                return_output[0],
+                return_output[1])
+            run_shell_cmd(cmd)
+        return_output = [i + '.gz' for i in return_output]
+
         ## return
         return return_output
 
@@ -945,9 +955,9 @@ class Trimmer(object):
         fx_type = seq_type(args['fq1'])
         return_output_name1 = fq1_prefix + '.' + fx_type
         return_output_name2 = fq2_prefix + '.' + fx_type
-        if args['gzip']:
-            return_output_name1 += '.gz'
-            return_output_name2 += '.gz'
+        # if args['gzip']:
+        #     return_output_name1 += '.gz'
+        #     return_output_name2 += '.gz'
 
         # return_output = [os.path.join(args['path_out'], i) for i in return_output_name]
         return_output = [
@@ -984,6 +994,8 @@ class Trimmer(object):
         count_input = fx_counter(fq1)
 
         ## 1. trim adapter
+        ## do not compress files
+        args['gzip'] = False
         path_cutadapt = os.path.join(path_out, '1_trim_adapter')
         if args['not_trim_adapter']:
             return_trim = [fq1, fq2]
@@ -1068,6 +1080,14 @@ class Trimmer(object):
             fo.write('%13s : %10d : %6.2f%%\n' % ('cut_end2', n_cut2, n_cut2 / count_input * 100))
             fo.write('%13s : %10d : %6.2f%%\n' % ('cut_to_length', n_cut3, n_cut3 / count_input * 100))
             fo.write('%13s : %10d : %6.2f%%\n' % ('output', count_cut3, count_cut3 / count_input * 100))
+
+        ## 7. compress output file
+        if self.kwargs['gzip']:
+            cmd = 'gzip {} {}'.format(
+                return_output[0],
+                return_output[1])
+            run_shell_cmd(cmd)
+        return_output = [i + '.gz' for i in return_output]
 
         ## return
         return return_output
