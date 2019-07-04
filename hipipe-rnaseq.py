@@ -99,6 +99,7 @@ from arguments import args_init
 from helper import *
 from alignment import Alignment, Alignment_log, Alignment_stat
 from hipipe_reporter import QC_reporter, Alignment_reporter
+from utils_parser import DesignReader
 
 
 logging.basicConfig(
@@ -111,9 +112,13 @@ log = logging.getLogger(__name__)
 def get_args():
     parser = argparse.ArgumentParser(prog='RNAseq-pipeline', 
                                      description='DEseq analysis')
-    parser.add_argument('-c1', nargs='+', required=True, metavar='control_fq',
+    parser.add_argument('--design', default=None,
+        help='TAB-delimited file saving arguments, 6-column required: \
+        <control-prefix> \
+        <treatment-prefix> <fq_dir> <output_dir> <genome> <spikein>')
+    parser.add_argument('-c1', nargs='+', metavar='control_fq', default=None,
         help='FASTQ files of Control sample replicates')
-    parser.add_argument('-t1', nargs='+', required=True, metavar='treatment_fq',
+    parser.add_argument('-t1', nargs='+', metavar='treatment_fq', default=None,
         help='FASTQ files of Treatment sample, replicates')
     parser.add_argument('-c2', nargs='+', required=False, metavar='control_fq_2',
         default=None,
@@ -127,11 +132,11 @@ def get_args():
         help='Name control samples')
     parser.add_argument('-T', metavar='Treatment_NAME', default=None,
         help='Name control samples')
-    parser.add_argument('-g', '--genome', required=True, default='dm6', 
-        choices=['dm3', 'dm6', 'hg19', 'hg38', 'mm9', 'mm10'],
+    parser.add_argument('-g', '--genome', default='dm6',
+        choices=['dm3', 'dm6', 'hg19', 'hg38', 'mm9', 'mm10', 'GRCh38'],
         help='Reference genome : dm3, dm6, hg19, hg39, mm10, default: dm6')
     parser.add_argument('-k', '--spikein', default=None, 
-        choices=[None, 'dm3', 'dm6', 'hg19', 'hg38', 'mm9', 'mm10'],
+        choices=[None, 'dm3', 'dm6', 'hg19', 'hg38', 'mm9', 'mm10', 'GRCh38'],
         help='Spike-in genome : dm3, hg19, hg38, mm10, default: None')
     parser.add_argument('--align-to-te', action='store_true',
         dest='align_to_te', help='if spcified, align reads to TE')
@@ -232,44 +237,6 @@ def init_rnaseq_project(x, analysis_type=1):
 
     # return values
     return out_dict
-
-
-# def run_shell_cmd(cmd, log):
-#     try:
-#         p = subprocess.Popen(cmd, shell=True,
-#             stdout=subprocess.PIPE,
-#             stderr=subprocess.STDOUT,
-#             universal_newlines=True,
-#             preexec_fn=os.setsid)
-#         pid = p.pid
-#         pgid = os.getpgid(pid)
-#         log.info('run_shell_cmd: PID={}, CMD={}'.format(pid, cmd))
-#         ret = ''
-#         while True:
-#             line = p.stdout.readline()
-#             if line=='' and p.poll() is not None:
-#                 break
-#             # log.debug('PID={}: {}'.format(pid,line.strip('\n')))
-#             # save log
-#             with open(log, 'wt') as fo:
-#                 if line:
-#                     print('PID={}: {}'.format(pid,line.strip('\n')))
-#                     fo.write(line)
-#                     ret += line
-#         p.communicate() # wait here
-#         if p.returncode > 0:
-#             raise subprocess.CalledProcessError(
-#                 p.returncode, cmd)
-#         return ret.strip('\n')
-#     except:
-#         # kill all child processes
-#         try:
-#             os.killpg(pgid, signal.SIGKILL)
-#             p.terminate()
-#         except:
-#             pass
-#         raise Exception('Killed PID={}, PGID={}\nCMD={}\nSTDOUT={}'.format(
-#             pid, pgid, cmd, ret))
 
 
 class fc(object):
@@ -374,6 +341,7 @@ def run_featureCounts(gtf, bam_files, out, strandness=0,
             fo.write(b + '\n')
 
     ## check BAM is PE or SE
+    # print(bam_files)
     pe_num = pysam.view('-c', '-f', '1', bam_files[0], catch_stdout=True)
     pe_num = int(pe_num)
     if pe_num > 0:
@@ -448,15 +416,15 @@ def gene_aligner(fq1_files, smp_name, args, fq2_files=None):
             if k.endswith('map_' + args['genome'] + '.bam'):
                 map_bam.append(k)
 
-    # create bigWig files
-    for bam in map_bam:
-        bam2bigwig(
-            bam=bam, 
-            genome=args['genome'], 
-            path_out=gene_align_path['bigWig'],
-            strandness=args['s'], 
-            binsize=args['bin_size'],
-            overwrite=args['overwrite'])                
+    # # create bigWig files
+    # for bam in map_bam:
+    #     bam2bigwig(
+    #         bam=bam, 
+    #         genome=args['genome'], 
+    #         path_out=gene_align_path['bigWig'],
+    #         strandness=args['s'], 
+    #         binsize=args['bin_size'],
+    #         overwrite=args['overwrite'])                
 
     return map_bam
 
@@ -492,14 +460,14 @@ def te_aligner(fq1_files, smp_name, args, fq2_files=None):
     map_bam = [item for sublist in map_bam_list for item in sublist]
 
     # create bigWig files
-    for bam in map_bam:
-        bam2bigwig(
-            bam=bam, 
-            genome=args['genome'], 
-            path_out=te_align_path['bigWig'],
-            strandness=args['s'], 
-            binsize=args['bin_size'],
-            overwrite=args['overwrite'])
+    # for bam in map_bam:
+    #     bam2bigwig(
+    #         bam=bam, 
+    #         genome=args['genome'], 
+    #         path_out=te_align_path['bigWig'],
+    #         strandness=args['s'], 
+    #         binsize=args['bin_size'],
+    #         overwrite=args['overwrite'])
 
     return map_bam
 
@@ -565,6 +533,7 @@ def deseq2_exe(control, treatment, path_out, genome, nameA=None,
     cmd = ' '.join([Rscript_exe, deseq2_script, 
         control, treatment, genome, deseq2_path, nameA, nameB, str(pvalue)])
     cmd += ' > {}'.format(deseq2_log)
+    # print(cmd)
     run_shell_cmd(cmd)
 
 
@@ -867,9 +836,9 @@ def map_stat(path):
         return None
 
 
-def main():
+def run(args):
     """Main for RNAseq analysis pipeline"""
-    args = args_init(vars(get_args()), align=True)
+    # args = args_init(vars(get_args()), align=True)
 
     log.info('running RNAseq pipeline')
 
@@ -885,7 +854,14 @@ def main():
         args['unique_only'] = True # default    
 
     if args['gtf'] is None:
-        args['gtf'] = Genome(**args).gene_gtf('ensembl')
+        args['gtf'] = Genome(**args).gene_gtf('refseq') # ucsc version
+
+    # for GRCh38 genome, using GENCODE version 
+    # if args['genome'] == 'GRCh38':
+    if args['genome'] in ['GRCh38', 'GRCm38']:
+        args['gtf'] = Genome(**args).gene_gtf('gencode')
+
+    # print(args['gtf'])
 
     ## update prefix
     ctl_prefix = str_common([os.path.basename(f) for f in args['c1']])
@@ -910,6 +886,46 @@ def main():
         extra_rnaseq(args)
 
     log.info('finish')
+
+
+def main():
+    args = args_init(vars(get_args()), align=True)
+
+    if args['design'] is None:
+        # require -c1, -t1, -g
+        if args['c1'] is None or args['t1'] is None:
+            log.error('require --design, or -c1, -t1')
+        else:
+            if not supportedGenome(args['genome']):
+                log.error('genome not supported: {}'.foramt(args['genome']))
+            run(args)
+    else:
+        design = DesignReader(args['design'])
+        # save to file
+        design.to_json()
+        # search dict
+        d = design.to_dict()
+
+        for k in d:
+            log.info(k)
+            dict_k = d[k]
+            args['c1'], args['c2'] = dict_k['control']
+            args['t1'], args['t2'] = dict_k['treatment']
+            args['c2'] = arg['c2'] if len(args['c2']) > 0 else None
+            args['t2'] = arg['t2'] if len(args['t2']) > 0 else None
+            args['C'] = dict_k['control_name']
+            args['T'] = dict_k['treatment_name']
+            args['genome'] = dict_k['genome']
+            args['path_out'] = dict_k['path_out']
+            args['spikein'] = dict_k['spikein']
+            
+            ## supported
+            if not supportedGenome(args['genome']):
+                log.info('genome not supported: {}'.foramt(args['genome']))
+                continue
+            run(args)
+        # print(d)
+
 
 if __name__ == '__main__':
     main()
