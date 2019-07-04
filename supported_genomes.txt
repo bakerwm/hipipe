@@ -1,0 +1,8 @@
+# supported genomes
+dm3
+dm6
+hg19
+hg38
+GRCh38
+mm10
+GRCm38
