@@ -41,10 +41,10 @@ def get_args():
     parser.add_argument('-n', '--smp-name', dest='smp_name',
         help='Name of the experiment')
     parser.add_argument('-g', '--genome', required=True, default='hg19', 
-        choices=['dm3', 'dm6', 'hg19', 'hg38', 'mm9', 'mm10'],
+        choices=['dm3', 'dm6', 'hg19', 'hg38', 'mm9', 'mm10', 'GRCh38'],
         help='Reference genome : dm3, hg19, hg39, mm10, default: hg19')
     parser.add_argument('-k', '--spikein', default=None, 
-        choices=[None, 'dm3', 'dm6', 'hg19', 'hg38', 'mm9', 'mm10'],
+        choices=[None, 'dm3', 'dm6', 'hg19', 'hg38', 'mm9', 'mm10', 'GRCh38'],
         help='Spike-in genome : dm3, hg19, hg38, mm10, default: None')
     parser.add_argument('-x', '--extra-index', nargs='+', dest='extra_index',
         help='Provide extra alignment index(es) for alignment, support multiple\

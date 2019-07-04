@@ -39,11 +39,12 @@ library(ggrepel)
 
 # run DESseq2 analysis
 goldclipReport::deseqHub(countA, countB,
-                         organism = "dm3",
+                         organism = organism,
                          nameA = nameA,
                          nameB = nameB,
                          outdir = output,
-                         pvalue_cutoff = pvalue)
+                         pvalue_cutoff = pvalue,
+                         readable = FALSE)
 path_de <- output
 
 ## Generate publish quality figures
@@ -54,5 +55,6 @@ stopifnot(file.exists(cnt_fix))
 print("generate publishable plots")
 print(paste0("found DESeq2 ouptut: ", cnt_fix))
 tmp <- DESeq2_publish_plot(cnt_fix, output, save2pdf = TRUE)
+
 # EOF
 
