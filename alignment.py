@@ -142,7 +142,7 @@ class Alignment(object):
 
 
     def run(self):
-        if self.fq2 is None:
+        if self.fq2 is None or len(self.fq2) == 0: # blank
             log.info('SE mode')
             map_files = self.align_se()
         else:
@@ -309,6 +309,7 @@ class AlignIndex(object):
                 tag)
 
         # validate
+        # print('{} : {}'.format(index, args['aligner']))
         if not self.index_validator(index, args['aligner']):
             index = None
         return index
@@ -376,7 +377,7 @@ class AlignIndexBuilder(object):
             if align_to_rRNA: # align to rRNA
                 index_rRNA = AlignIndex(align_to_rRNA=True, **args).get_index()
             # spikein
-            if isinstance(args['spikein'], str):
+            if isinstance(args['spikein'], str) and not args['genome'] == args['spikein']:
                 args['genome'] = args['spikein'] # update
                 index_sp = AlignIndex(align_to_rRNA=False, **args).get_index()
                 if align_to_rRNA: # align to rRNA
@@ -656,7 +657,7 @@ class AlignNode(object):
         # small genome
         seed_max = 50 # STAR default: 50
         if args['small_genome']:
-            seed_max = 20 # even smaller
+            seed_max = 5 # even smaller # https://github.com/alexdobin/STAR/issues/329
 
         para_unique = '--outFilterMultimapNmax %s --seedPerWindowNmax %s' % (n_map, seed_max)
 
@@ -870,7 +871,7 @@ class AlignNode(object):
         # small genome
         seed_max = 50 # STAR default: 50
         if args['small_genome']:
-            seed_max = 20 # even smaller
+            seed_max = 10 # even smaller # https://github.com/alexdobin/STAR/issues/329
 
         para_unique = '--outFilterMultimapNmax %s --seedPerWindowNmax %s' % (n_map, seed_max)
 
@@ -1016,10 +1017,14 @@ class AlignHub(object):
             x_unmap = AlignNode(**args).get_unmap()
 
             # suppress --unique-only for rRNA mapping
+            # assign small_genome for STAR on rRNA mapping, reduce mapping time : https://github.com/alexdobin/STAR/issues/329
             index_name = AlignIndex(**args).get_index_name()
             unique_old = args['unique_only']
+            small_genome = args['small_genome']
             if index_name.endswith('rRNA'):
                 args['unique_only'] = False
+                args['small_genome'] = True
+
 
             if self.dry_run: # do not run alignment
                 pass
@@ -1031,6 +1036,7 @@ class AlignHub(object):
             if self.align_by_order:
                 args['fq1'] = x_unmap
             args['unique_only'] = unique_old # update
+            args['small_genome'] = small_genome # update
 
             ## save bam files
             map_files.append(x_bam)
@@ -1060,10 +1066,13 @@ class AlignHub(object):
             x_unmap = AlignNode(**args).get_unmap()
 
             # suppress --unique-only for rRNA mapping
+            # assign small_genome for STAR on rRNA mapping, reduce mapping time : https://github.com/alexdobin/STAR/issues/329
             index_name = AlignIndex(**args).get_index_name()
             unique_old = args['unique_only']
+            small_genome = args['small_genome']
             if index_name.endswith('rRNA'):
                 args['unique_only'] = False
+                args['small_genome'] = True
 
             if self.dry_run: # do not run alignment
                 pass
@@ -1076,7 +1085,8 @@ class AlignHub(object):
                 args['fq1'] = x_unmap[0]
                 args['fq2'] = x_unmap[1]
             args['unique_only'] = unique_old # update
-
+            args['small_genome'] = small_genome # update
+            
             ## save bam files
             map_files.append(x_bam)
 
