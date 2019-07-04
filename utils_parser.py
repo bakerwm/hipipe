@@ -10,6 +10,8 @@ import tempfile
 import pysam
 import pandas as pd
 
+import datetime
+import logging
 
 class Cutadapt_log(object):
     """Wrapper cutadapt log file"""
@@ -154,7 +156,6 @@ def trim_wrapper(path, smp_name='demo'):
     return df
 
 
-
 ## mapping pct
 def map_wrapper(path, smp_name='demo'):
     """
@@ -179,8 +180,125 @@ def map_wrapper(path, smp_name='demo'):
     return df
 
 
+## design
+class DesignReader(object):
+    """Parsing tab file for arguments
+    return dict 
+    optional:
+    return: json file, dict
+    """
+
+    def __init__(self, file, j=None):
+        self.file = file
+        self.j = j
+        self.d = self.parseTxt()
+
+    def parseFqfiles(self, x, path):
+        """Parse fastq files within path, using the prefix
+        PE reads
+        SE reads
+
+        *.fastq
+        *.fq
+        *.fastq.gz
+        *.fq.gz
+
+        _1.
+        _2.
+
+        """
+
+        all_files = [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
+
+        # filter fastq
+        p1 = re.compile(r'(_[12])?.f(ast)?q(.gz)?$')
+        hit_files = [f for f in all_files if p1.search(f) and x in f]
+        
+        # determine SE or PE
+        fq_r1 = []
+        fq_r2 = []
+        p2 = re.compile(r'_[rR]?2.f(ast)?q(.gz)?$') # read1
+        for f in sorted(hit_files):
+            if p2.search(f):
+                fq_r2.append(f)
+            else:
+                fq_r1.append(f)
+
+        if len(fq_r1) > 3:
+            logging.warning('too many records matched : {} \n{}'.format(x, fq_r1))
+
+        if len(fq_r2) > 0 and not len(fq_r1) == len(fq_r2):
+            logging.error('read1 and read2 not matched: \n{}\n{}'.format(fq_r1, fq_r2))
+
+        if len(fq_r1) == 0 and len(fq_r2) == 0:
+            logging.error('no fastq files matched: {} {}'.format(x))
+
+        # print('\t'.join(fq_r1))
+        return [fq_r1, fq_r2]
 
 
+    def parseTxt(self):
+        """parse txt and create dict
+
+        control_name    treatment_name  output genome
+
+        """
+        dd = {}
+        with open(self.file, 'rt') as fi:
+            nline = 1
+            for line in fi:
+                if line.strip().startswith('#') or not line.strip():
+                    nline += 1
+                    continue
+                try:
+                    ctl, tre, fq_dir, out, genome, spikein = line.strip().split('\t')
+                except:
+                    logging.error('unknown format in line-{}: {}'.format(nline, line))
+                    continue
+
+                # parse fastq files
+                k = '{}_vs_{}'.format(ctl, tre)
+                ctl_fq = self.parseFqfiles(ctl, fq_dir)
+                tre_fq = self.parseFqfiles(tre, fq_dir)
+
+                if ctl == tre or ctl_fq == tre_fq:
+                    logging.warning('identical names detected in line-{}: {}'.format(nline, line))
+                    continue
+
+                if k in dd:
+                    logging.warning('duplicated design in line-{}: {}'.format(nline, line))
+                    continue
+
+                # tre_fq = None
+
+                dd[k] = {
+                    'control': ctl_fq,
+                    'control_name': ctl,
+                    'treatment': tre_fq,
+                    'treatment_name': tre,
+                    'path_out': out,
+                    'genome': genome,
+                    'spikein': spikein,
+                }
+                nline +=1
+
+        return dd
+
+    
+    def to_dict(self):
+        # return self.parseTxt()
+        return self.d
 
 
+    def to_json(self, file=None):
+        # d = self.to_dict()
+
+        if file is None:
+            tmp_prefix = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+            file = '{}.design.json'.format(tmp_prefix)
+
+        with open(file, 'wt') as fo:
+            json.dump(self.d, fo, indent=4, sort_keys=True)
+
+        return file
 
