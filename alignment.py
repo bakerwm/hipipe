@@ -1021,7 +1021,7 @@ class AlignHub(object):
             index_name = AlignIndex(**args).get_index_name()
             unique_old = args['unique_only']
             small_genome = args['small_genome']
-            if index_name.endswith('rRNA'):
+            if index_name.endswith('rRNA') or index_name.endswith('piRNA_clusters') or index_name.endswith('transposon'):
                 args['unique_only'] = False
                 args['small_genome'] = True
 
@@ -1070,7 +1070,8 @@ class AlignHub(object):
             index_name = AlignIndex(**args).get_index_name()
             unique_old = args['unique_only']
             small_genome = args['small_genome']
-            if index_name.endswith('rRNA'):
+            if index_name.endswith('rRNA') or index_name.endswith('piRNA_clusters') or index_name.endswith('transposon'):
+            # if index_name.endswith('rRNA'):
                 args['unique_only'] = False
                 args['small_genome'] = True
 
