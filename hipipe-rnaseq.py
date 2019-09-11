@@ -133,11 +133,13 @@ def get_args():
     parser.add_argument('-T', metavar='Treatment_NAME', default=None,
         help='Name control samples')
     parser.add_argument('-g', '--genome', default='dm6',
-        choices=['dm3', 'dm6', 'hg19', 'hg38', 'mm9', 'mm10', 'GRCh38'],
+        # choices=['dm3', 'dm6', 'hg19', 'hg38', 'mm9', 'mm10', 'GRCh38'],
         help='Reference genome : dm3, dm6, hg19, hg39, mm10, default: dm6')
     parser.add_argument('-k', '--spikein', default=None, 
-        choices=[None, 'dm3', 'dm6', 'hg19', 'hg38', 'mm9', 'mm10', 'GRCh38'],
+        # choices=[None, 'dm3', 'dm6', 'hg19', 'hg38', 'mm9', 'mm10', 'GRCh38'],
         help='Spike-in genome : dm3, hg19, hg38, mm10, default: None')
+    parser.add_argument('--gtf', default=None,
+        help='genome annotation file in GTF format, from ensembl')
     parser.add_argument('--align-to-te', action='store_true',
         dest='align_to_te', help='if spcified, align reads to TE')
     parser.add_argument('--te-index', default=None, dest='te_index',
@@ -147,7 +149,7 @@ def get_args():
     parser.add_argument('-x', '--extra-index', nargs='+', dest='extra_index',
         help='Provide extra alignment index(es) for alignment, support multiple\
         indexes. eg. Transposon, tRNA, rRNA and so on.')
-    parser.add_argument('--gtf', default=None,
+    parser.add_argument('--extra-gtf', default=None, dest='extra_gtf',
         help='genome annotation file in GTF format, from ensembl')
     parser.add_argument('--include-multi-reads', action='store_true', 
         dest='include_multi_reads',
@@ -455,6 +457,10 @@ def te_aligner(fq1_files, smp_name, args, fq2_files=None):
     args['smp_name'] = smp_name
     args['align_to_te'] = True
 
+    # extra small genome
+    small_genome = args['small_genome']
+    args['small_genome'] = True
+
     ## run alignment
     map_bam_list = Alignment(**args).run()
     map_bam = [item for sublist in map_bam_list for item in sublist]
@@ -468,6 +474,9 @@ def te_aligner(fq1_files, smp_name, args, fq2_files=None):
     #         strandness=args['s'], 
     #         binsize=args['bin_size'],
     #         overwrite=args['overwrite'])
+
+    ## return
+    args['small_genome'] = small_genome
 
     return map_bam
 
@@ -496,8 +505,15 @@ def extra_aligner(fq1_files, smp_name, args, fq2_files=None):
     args['smp_name'] = smp_name
     args['align_to_te'] = False
 
+    # extra small genome, for STAR
+    small_genome = args['small_genome']
+    args['small_genome'] = True
+
     ## run alignment
     map_bam = Alignment(**args).run()
+
+    ## return
+    args['small_genome'] = small_genome
 
     ## return
     return map_bam
@@ -533,6 +549,7 @@ def deseq2_exe(control, treatment, path_out, genome, nameA=None,
     cmd = ' '.join([Rscript_exe, deseq2_script, 
         control, treatment, genome, deseq2_path, nameA, nameB, str(pvalue)])
     cmd += ' > {}'.format(deseq2_log)
+    print(cmd)
     # print(cmd)
     run_shell_cmd(cmd)
 
@@ -636,28 +653,18 @@ def gene_rnaseq(args):
         path_suffix='antisense')    
 
 
-def te_rnaseq(args):
+def te_rnaseq(args, gtf):
     """RNAseq pipeline analysis for Transposon, (only support dm3)
     require, gtf, bam, ...
     """
     log.info('running for transposon')
     group = 'transposon' # !!!! only for dm3
-    ## args
-    ## update gtf
-    #  args['gtf'] = Genome(args['genome']).te_gtf()
-    ## !!!! only for dm3
-    ## !!!! require: --te-gtf, --te-index
-    if args['genome'] in ['dm3']:
-        args['gtf'] = '/home/wangming/data/genome/dm3/FL10B/FL10B_and_transposon/FL10B_transposon.gtf'
-    # elif args['genome'] in ['dm6']:
-    #    args['gtf'] = '/home/wangming/data/genome/dm6/FL10B/FL10B_and_transposon/FL10B_transposon.gtf'
-    else:
-        args['gtf'] = Genome(args['genome']).te_gtf()
 
-
-    if args['gtf'] is None or not os.path.exists(args['gtf']):
-        log.warning('transposon analysis skipped, gtf not exists: {}'.format(args['gtf']))
+    if not os.path.exists(gtf):
+        log.warning('transposon analysis skipped, gtf not exists: {}'.format(gtf))
         return None
+    # sys.exit(gtf)
+
 
     ###########################
     ## sense strand analysis ##
@@ -671,7 +678,7 @@ def te_rnaseq(args):
     ## count reads
     ctl_count = os.path.join(args['path_out'], args['C'], group, 'count', 'count.sens.txt')
     run_featureCounts(
-        gtf=args['gtf'], 
+        gtf=gtf, 
         bam_files=ctl_bam, 
         out=ctl_count, 
         strandness=args['s'], 
@@ -687,7 +694,7 @@ def te_rnaseq(args):
     ## count reads
     tre_count = os.path.join(args['path_out'], args['T'], group, 'count', 'count.sens.txt')
     run_featureCounts(
-        gtf=args['gtf'], 
+        gtf=gtf, 
         bam_files=tre_bam, 
         out=tre_count, 
         strandness=args['s'], 
@@ -721,7 +728,7 @@ def te_rnaseq(args):
     ## count reads
     ctl_count = os.path.join(args['path_out'], args['C'], group, 'count', 'count.anti.txt')
     run_featureCounts(
-        gtf=args['gtf'], 
+        gtf=gtf, 
         bam_files=ctl_bam, 
         out=ctl_count, 
         strandness=args['anti_strand'], 
@@ -731,7 +738,7 @@ def te_rnaseq(args):
     ## count reads
     tre_count = os.path.join(args['path_out'], args['T'], group, 'count', 'count.anti.txt')
     run_featureCounts(
-        gtf=args['gtf'], 
+        gtf=gtf, 
         bam_files=tre_bam, 
         out=tre_count, 
         strandness=args['anti_strand'], 
@@ -758,22 +765,25 @@ def extra_rnaseq(args, gtf):
     log.info('running for other reference')
     group = 'extra'
     ## update gtf
-    args['gtf'] = gtf
+    # args['gtf'] = gtf
 
     ## check if extra_index exists
     if args['extra_index'] is None:
-        log.warning('extra analysis skipped, index not exists: {}'.format(args['gtf']))
+        log.warning('extra analysis skipped, index not exists: {}'.format(args['extra_index']))
     elif not os.path.exists(gtf):
         log.warning('extra analysis skipped, gtf file not exists: {}'.foramt(gtf))
     else:
         ## control, args['c1']
         ctl_args = args.copy()
         ctl_args['path_out'] = os.path.join(args['path_out'], args['C'])    
-        mapping_te(args['c1'], args['C'], ctl_args)
+        ctl_bam = extra_aligner(args['c1'], args['C'], ctl_args)
+        ## flaten
+        ctl_bam = [item for sublist in ctl_bam for item in sublist]
+
         ## count reads
         ctl_count = os.path.join(args['path_out'], args['C'], group, 'count', 'count.txt')
         run_featureCounts(
-            gtf=args['gtf'], 
+            gtf=gtf, 
             bam_files=ctl_bam, 
             out=ctl_count, 
             strandness=args['s'], 
@@ -783,11 +793,13 @@ def extra_rnaseq(args, gtf):
         ## treatment, args['t1']
         tre_args = args.copy()
         tre_args['path_out'] = os.path.join(args['path_out'], args['T'])
-        mapping_te(args['t1'], args['T'], tre_args)
+        tre_bam = extra_aligner(args['t1'], args['T'], tre_args)
+        tre_bam = [item for sublist in tre_bam for item in sublist]
+
         ## count reads
         tre_count = os.path.join(args['path_out'], args['T'], group, 'count', 'count.txt')
         run_featureCounts(
-            gtf=args['gtf'], 
+            gtf=gtf, 
             bam_files=tre_bam, 
             out=tre_count, 
             strandness=args['s'], 
@@ -803,7 +815,51 @@ def extra_rnaseq(args, gtf):
             genome=args['genome'], 
             nameA=args['C'], 
             nameB=args['T'], 
-            group=group)
+            group=group,
+            path_suffix='sense')
+
+    ###############################
+    ## antisense strand analysis ##
+    ###############################
+    # determine the strandness
+    if args['s'] == 2:
+        args['anti_strand'] = 1
+    elif args['s'] == 1:
+        args['anti_strand'] = 2
+    else:
+        args['anti_strand'] = 0
+
+    ## count reads
+    ctl_count = os.path.join(args['path_out'], args['C'], group, 'count', 'count.anti.txt')
+    run_featureCounts(
+        gtf=gtf, 
+        bam_files=ctl_bam, 
+        out=ctl_count, 
+        strandness=args['anti_strand'], 
+        threads=args['threads'], 
+        overwrite=args['overwrite'])
+
+    ## count reads
+    tre_count = os.path.join(args['path_out'], args['T'], group, 'count', 'count.anti.txt')
+    run_featureCounts(
+        gtf=gtf, 
+        bam_files=tre_bam, 
+        out=tre_count, 
+        strandness=args['anti_strand'], 
+        threads=args['threads'], 
+        overwrite=args['overwrite'])
+
+    ## de analysis using DESeq2
+    de_path = os.path.join(args['path_out'], args['C'] + '.vs.' + args['T'])
+    deseq2_exe(
+        control=ctl_count, 
+        treatment=tre_count, 
+        path_out=de_path, 
+        genome=args['genome'], 
+        nameA=args['C'], 
+        nameB=args['T'], 
+        group=group,
+        path_suffix='antisense')
 
 
 def map_stat(path):
@@ -853,13 +909,19 @@ def run(args):
     else:
         args['unique_only'] = True # default    
 
+    # determine gtf file
+    # gene gtf
     if args['gtf'] is None:
         args['gtf'] = Genome(**args).gene_gtf('refseq') # ucsc version
 
-    # for GRCh38 genome, using GENCODE version 
-    # if args['genome'] == 'GRCh38':
-    if args['genome'] in ['GRCh38', 'GRCm38']:
-        args['gtf'] = Genome(**args).gene_gtf('gencode')
+        # for GRCh38 genome, using GENCODE version 
+        # if args['genome'] == 'GRCh38':
+        if args['genome'] in ['GRCh38', 'GRCm38']:
+            args['gtf'] = Genome(**args).gene_gtf('ensembl') # gencode
+
+    # te gtf
+    if args['te_gtf'] is None:
+        args['te_gtf'] = Genome(**args).te_gtf()
 
     # print(args['gtf'])
 
@@ -874,16 +936,12 @@ def run(args):
         args['T'] = tre_prefix
     
     ## run pipeline
-    ## gene
-    gene_rnaseq(args)
-
-    ## te
-    if args['align_to_te']:
-        te_rnaseq(args)
-
-    ## extra
     if args['extra_index']:
-        extra_rnaseq(args)
+        extra_rnaseq(args, args['extra_gtf'])
+    elif args['align_to_te']:
+        te_rnaseq(args, args['te_gtf'])
+    else:
+        gene_rnaseq(args)
 
     log.info('finish')
 
@@ -911,8 +969,8 @@ def main():
             dict_k = d[k]
             args['c1'], args['c2'] = dict_k['control']
             args['t1'], args['t2'] = dict_k['treatment']
-            args['c2'] = arg['c2'] if len(args['c2']) > 0 else None
-            args['t2'] = arg['t2'] if len(args['t2']) > 0 else None
+            args['c2'] = args['c2'] if len(args['c2']) > 0 else None
+            args['t2'] = args['t2'] if len(args['t2']) > 0 else None
             args['C'] = dict_k['control_name']
             args['T'] = dict_k['treatment_name']
             args['genome'] = dict_k['genome']
@@ -921,7 +979,7 @@ def main():
             
             ## supported
             if not supportedGenome(args['genome']):
-                log.info('genome not supported: {}'.foramt(args['genome']))
+                log.info('genome not supported: {}'.format(args['genome']))
                 continue
             run(args)
         # print(d)

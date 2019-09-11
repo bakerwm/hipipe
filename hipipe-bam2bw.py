@@ -24,8 +24,8 @@ def get_args():
         metavar='OUTPUT',  help='The directory to save results. (default:\
         current directory)')
     parser.add_argument('-g', '--genome', required=False, default=None, 
-        dest='genome', choices=[None, 'dm3', 'hg19', 'hg38', 'mm10', 'mm9'],
-        help='Reference genome : dm3, hg19, hg39, mm10. (default: hg19)')
+        dest='genome', choices=[None, 'dm3', 'dm6', 'hg19', 'hg38', 'mm10', 'mm9'],
+        help='Reference genome : dm3, dm6, hg19, hg39, mm10. (default: hg19)')
     parser.add_argument('-s', '--scale', nargs='+', required=False, \
         default=['1.0'], type=float, dest='scale', 
         help='The computed scaling factor will be multiplied by this. \

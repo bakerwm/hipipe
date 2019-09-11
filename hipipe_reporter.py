@@ -7,15 +7,18 @@ import subprocess
 import sys
 from helper import run_shell_cmd, which
 
+
 # logging.basicConfig(format = '[%(asctime)s] %(message)s', 
 #                     datefmt = '%Y-%m-%d %H:%M:%S', 
 #                     level = logging.DEBUG)
+
 
 logging.basicConfig(
     format='[%(asctime)s %(levelname)s] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
     stream=sys.stdout)
 log = logging.getLogger(__name__)
+
 
 class QC_reporter(object):
     """Make html report for fastqc statistics file

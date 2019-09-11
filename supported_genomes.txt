@@ -6,3 +6,4 @@ hg38
 GRCh38
 mm10
 GRCm38
+msmeg
