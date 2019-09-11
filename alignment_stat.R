@@ -39,6 +39,7 @@ library(goldclipReport)
 if(dir.exists(input)) {
   stat_files <- list.files(input, "*mapping_stat.csv", all.files = TRUE,
                            full.names = TRUE, ignore.case = TRUE)
+  stat_files <- normalizePath(stat_files)
 } else if(file.exists(input)) {
  stat_files <- readr::read_lines(input, skip_empty_rows = TRUE)
 } else {
