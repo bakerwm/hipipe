@@ -929,9 +929,8 @@ class Trimmer(object):
 
         ## 7. compress output file
         if self.kwargs['gzip']:
-            cmd = 'gzip {} {}'.format(
-                return_output[0],
-                return_output[1])
+            cmd = 'gzip {}'.format(
+                return_output)
             run_shell_cmd(cmd)
         return_output = [i + '.gz' for i in return_output]
 
@@ -967,7 +966,7 @@ class Trimmer(object):
         ## save arguments
         args_file = os.path.join(args['path_out'], fq1_prefix + '.arguments.txt')
         args_pickle = os.path.join(args['path_out'], fq1_prefix + '.arguments.pickle')
-        if args_checker(args, args_pickle) and os.path.exists(return_output) and args['overwrite'] is False:
+        if args_checker(args, args_pickle) and os.path.exists(return_output[0]) and args['overwrite'] is False:
             log.info('file exists, arguments not changed, trimming skipped : %s' % fq1_prefix)
             return return_output
         else:
