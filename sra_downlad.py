@@ -207,7 +207,7 @@ def id_url(x, fasp=1, ENA=0):
     if fasp:
         server = 'era-fasp@fasp.sra.ebi.ac.uk:' if ENA else 'anonftp@ftp.ncbi.nlm.nih.gov:'
     else:
-        server = 'ftp://ftp.sra.ebi.ac.uk' if ENA else 'ftp://ftp.ncbi.nlm.nih.gov'
+        server = 'ftp.sra.ebi.ac.uk' if ENA else 'ftp.ncbi.nlm.nih.gov'
 
     # prefix
     path_prefix = '/vol1/fastq' if ENA else '/sra/sra-instant/reads/ByRun/sra'
@@ -377,9 +377,11 @@ def file_downloader(x, outdir, max_rate='24m', fasp=True, ENA=False):
     """
     downloader = aspera_download if fasp else ftp_download
     url = id_url(x, fasp, ENA)
+    url = os.path.normpath(url)
 
     # parse remote files
     url_ftp = id_url(x, fasp=False, ENA=ENA)
+    url_ftp = os.path.normpath(url_ftp)
 
     remote_filenames = ftp_dir_list(url_ftp)[0]
 
@@ -415,7 +417,7 @@ def main():
     for i in ids:
         count += 1
         print('[{}/{}] {}'.format(count, len(ids), i))
-        # file_downloader(i, args.out, args.max_rate, fasp, ena)
+        file_downloader(i, args.out, args.max_rate, fasp, ena)
 
 
 if __name__ == '__main__':
