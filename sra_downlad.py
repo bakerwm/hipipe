@@ -75,6 +75,8 @@ def get_args():
     parser.add_argument('-t', dest='transport', default='fasp',
         choices=['fasp', 'ftp', 'both'],
         help='Transport: one of: fasp; ftp; both. default: [fasp]')
+    parser.add_argument('--dry-run', dest='dry_run', action='store_true',
+        help='Test the connection, but not download the files')
     parser.add_argument('-l', '--max-rate', dest='max_rate', default='24m',
         help='Max transfer rate, G/g, M/m, K/k, or bytes, default: [24m]')
     parser.add_argument('--log-level', default='INFO', dest='log_level',
@@ -371,7 +373,7 @@ def aspera_download(url, outdir, max_rate='24m'):
     return flag
 
 
-def file_downloader(x, outdir, max_rate='24m', fasp=True, ENA=False):
+def file_downloader(x, outdir, max_rate='24m', fasp=True, ENA=False, dry_run=False):
     """Download sra files from EBI|ENA
     using fasp or FTP 
     """
@@ -391,8 +393,10 @@ def file_downloader(x, outdir, max_rate='24m', fasp=True, ENA=False):
         if os.path.exists(local_file):
             log.info('[{}] local file exists, downloading skipped ...'.format(f))
         else:
-            # downloader(url_f, outdir, max_rate)
-            print(url_f)
+            if dry_run:
+                log.info(url_f)
+            else:
+                downloader(url_f, outdir, max_rate)
 
 
 def main():
@@ -417,7 +421,7 @@ def main():
     for i in ids:
         count += 1
         print('[{}/{}] {}'.format(count, len(ids), i))
-        file_downloader(i, args.out, args.max_rate, fasp, ena)
+        file_downloader(i, args.out, args.max_rate, fasp, ena, dry_run=args.dry_run)
 
 
 if __name__ == '__main__':
