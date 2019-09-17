@@ -1,4 +1,4 @@
-#!/us/bin/env python3
+#!/usr/bin/env python3
 
 """Download sequencing data (.sra) from SRA or ENA 
 
