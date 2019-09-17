@@ -139,9 +139,10 @@ def id_parser_n(x):
     if os.path.exists(x):
         with open(x, 'rt') as fi:
             for line in fi:
-                s = line.strip().split()[0]
-                if s.startswith('#') or s == '':
+                line = line.strip()
+                if line.startswith('#') or line == '':
                     continue
+                s = line.split()[0]
                 if id_validator(s):
                     out.append(s)
                 else:
@@ -273,11 +274,15 @@ def ftp_dir_list(url):
         ftp.cwd(remote_dir) # switch to directory
         ftp.retrlines('NLST', remote_filenames.append) # list of file names
         ftp.quit()
+        out = [remote_filenames, server, remote_dir]
     except:
-        raise Exception('failed to list files: ' + url)
+        # raise Exception('failed to list files: ' + url)
+        fn = os.path.basename(url)
+        fid = os.path.splitext(fn)[0]
+        log.error('failed - access to record: {}'.format(fid))
+        out = []
 
-
-    return [remote_filenames, server, remote_dir]
+    return out
 
 
 def ftp_download(url, outdir, max_rate='24m'):
@@ -303,7 +308,8 @@ def ftp_download(url, outdir, max_rate='24m'):
             ftp.login()
             ftp.cwd(remote_dir) # switch to directory
         except:
-            raise Exception('failed to connect FTP server: ' + server)
+            # raise Exception('failed to connect FTP server: ' + server)
+            log.error('failed to access FTP url: {}'.format(url))
 
         count = 0
         for f in remote_filenames:
@@ -385,18 +391,21 @@ def file_downloader(x, outdir, max_rate='24m', fasp=True, ENA=False, dry_run=Fal
     url_ftp = id_url(x, fasp=False, ENA=ENA)
     url_ftp = os.path.normpath(url_ftp)
 
-    remote_filenames = ftp_dir_list(url_ftp)[0]
+    out_list = ftp_dir_list(url_ftp)
+    # remote_filenames = ftp_dir_list(url_ftp)[0]
 
-    for f in remote_filenames:
-        url_f = os.path.join(os.path.dirname(url), f)
-        local_file = os.path.join(outdir, f)
-        if os.path.exists(local_file):
-            log.info('[{}] local file exists, downloading skipped ...'.format(f))
-        else:
-            if dry_run:
-                log.info(url_f)
+    if out_list:
+        remote_filenames = out_list[0]
+        for f in remote_filenames:
+            url_f = os.path.join(os.path.dirname(url), f)
+            local_file = os.path.join(outdir, f)
+            if os.path.exists(local_file):
+                log.info('[{}] local file exists, downloading skipped ...'.format(f))
             else:
-                downloader(url_f, outdir, max_rate)
+                if dry_run:
+                    log.info('ok - access to record: {}'.format(x))
+                else:
+                    downloader(url_f, outdir, max_rate)
 
 
 def main():
