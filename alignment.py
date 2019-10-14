@@ -740,7 +740,7 @@ class AlignNode(object):
         if os.path.exists(map_bam) and args['overwrite'] is False:
             log.info('bam file exists: %s' % map_bam)
         else:
-            cmd = '{} {} {} -p {} --mm --best --sam --no-unal '
+            cmd = '{} {} {} -p {} --chunkmbs 200 --mm --best --sam --no-unal '
             cmd += '--un {} {} -1 {} -2 {} 2> {} | '
             cmd += 'samtools view -Su -f 0x2 -@ {} - | '
             cmd += 'samtools sort -@ {} -o {} -'
