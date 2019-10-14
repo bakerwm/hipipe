@@ -24,6 +24,8 @@ import pysam
 import pybedtools
 import binascii
 from requests import get  # to make GET request
+
+
 # from goldclip.bin.bed_fixer import *
 # from goldclip.configure import goldclip_home
 # from goldclip.helper import *
@@ -33,11 +35,33 @@ from requests import get  # to make GET request
 #                     datefmt = '%Y-%m-%d %H:%M:%S', 
 #                     level = logging.DEBUG)
 
+
 logging.basicConfig(
     format='[%(asctime)s %(levelname)s] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
     stream=sys.stdout)
 log = logging.getLogger(__name__)
+
+
+def supportedGenome(x):
+    """Check if input genome is supported by current script
+    saved in file: supported_genome.txt
+    """
+    scriptpath = os.path.realpath(__file__)
+    s = os.path.join(os.path.dirname(scriptpath), 'supported_genomes.txt')
+    hit = None
+    with open(s, 'rt') as fi:
+        for line in fi:
+            if line.strip().startswith('#') and not line.strip():
+                continue
+            g = line.strip()
+            if x == g or x.lower() == g.lower():
+                hit = g
+
+    if not hit:
+        log.warning('genomes not supported: {}'.format(x))
+
+    return hit
 
 
 def eprint(*args, **kwargs):
@@ -367,48 +391,102 @@ def fx_counter(fn):
         return None
 
 
-def str_common(strList, suffix = False):
-    # extract longest prefix/suffix from list of strings
-    # default: prefix
-    # sort strings by len
-    def iterStop(exp):
-        if exp is False:
-            raise StopIteration
-        else:
-            return True    
+def str_common(x, suffix=False, longest=False):
 
-    def commonPrefix(s1, s2):
-        # prefix
-        return ''.join(list(val for i, val in enumerate(s1) 
-                       if iterStop(s2[i] is val)))
+    from difflib import SequenceMatcher
 
-    def fact(l):
-        if len(l) ==  1:
-            return l[0]
-        else:
-            la = l[0:2]
-            lb = l[2:]
-            s = commonPrefix(la[0], la[1])
-            lb.insert(0, s)
-            return fact(lb)
+    def common_start(sa, sb):
+        """ returns the longest common substring from the beginning of sa and sb """
+        def _iter():
+            for a, b in zip(sa, sb):
+                if a == b:
+                    yield a
+                else:
+                    return
 
-    ## empty or single item 
-    if len(strList) ==  0:
-        return ''
-    elif len(strList) ==  1:
-        return strList[0]
+        return ''.join(_iter())
+
+    # see: https://stackoverflow.com/a/39404777/2530783
+    def common_longest(s1, s2):
+        match = SequenceMatcher(None, s1, s2).find_longest_match(0, len(s1), 0, len(s2))
+        return s1[match.a: match.a + match.size]
+
+
+    def common_multi(s, longest=False):
+        if isinstance(s, str):
+            return s
+        elif len(s) == 2:
+            if longest:
+                return common_longest(s[0], s[1])
+            else:
+                return common_start(s[0], s[1])
+        elif len(s) > 2:
+            s1 = s.pop()
+            s2 = s.pop()
+            if longest:
+                sx = common_longest(s1, s2)
+            else:
+                sx = common_start(s1, s2)
+            s.append(sx)
+            # return
+            return common_multi(s)
+
+
+    if suffix:
+        # print('suffix')
+        x = [f[::-1] for f in x]
+        x_common = common_multi(x, longest)
+        x_common = x_common[::-1]
     else:
-        ## save a copy of list
-        L2 = sorted(strList, key = len)
-        c = fact(L2)
-    
-    ## suffix, reverse strings
-    if suffix is True:
-        L2 = [i[::-1] for i in L2]
-        c = fact(L2)
-        c = c[::-1]
+        # print('prefix')
+        x_common = common_multi(x, longest)
 
-    return c # string 0-index
+    return(x_common)
+
+
+# def str_common(strList, suffix = False):
+#     # extract longest prefix/suffix from list of strings
+#     # default: prefix
+#     # sort strings by len
+#     def iterStop(exp):
+#         if exp is False:
+#             raise StopIteration
+#         else:
+#             return True    
+
+#     def commonPrefix(s1, s2):
+#         sys.exit('{} : {}'.format(s1, s2))
+#         # prefix
+#         return ''.join(list(val for i, val in enumerate(s1) 
+#                        if iterStop(s2[i] is val)))
+
+#     def fact(l):
+#         if len(l) ==  1:
+#             return l[0]
+#         else:
+#             la = l[0:2]
+#             lb = l[2:]
+#             s = commonPrefix(la[0], la[1])
+#             lb.insert(0, s)
+#             return fact(lb)
+
+#     ## empty or single item 
+#     if len(strList) ==  0:
+#         return ''
+#     elif len(strList) ==  1:
+#         return strList[0]
+#     else:
+#         ## save a copy of list
+#         L2 = sorted(strList, key = len)
+#         c = fact(L2)
+    
+#     ## suffix, reverse strings
+#     if suffix is True:
+#         L2 = [i[::-1] for i in L2]
+#         c = fact(L2)
+#         c = c[::-1]
+
+#     return c # string 0-index
 
 
 def file_prefix(fn, with_path = False):
@@ -636,7 +714,8 @@ def bam2bigwig(bam, genome, path_out, strandness=0, binsize=1, overwrite=False, 
                'mm9': 2620345972,
                'mm10': 2652783500,
                'hg19': 2451960000,
-               'hg38': 2913022398,}
+               'hg38': 2913022398,
+               'GRCh38': 2913022398}
     gsize = effsize[genome]
 
     # create bam index
@@ -773,7 +852,8 @@ def bam2bw(bam, path_out, scale=1, **args):
                'mm9': 2620345972,
                'mm10': 2652783500,
                'hg19': 2451960000,
-               'hg38': 2913022398,}
+               'hg38': 2913022398,
+               'GRCh38': 2913022398}
     gsize = effsize.get(args['genome'], None)
 
     ## command
@@ -816,6 +896,10 @@ def bam2bw(bam, path_out, scale=1, **args):
 
     ## opt
     opt3 = '--scaleFactor %s -b %s -o %s --binSize %s -p %s' % (scale, bam, bw_file, args['binsize'], args['p'])
+  
+    ## opt
+    if args['normalizeUsing']:
+        opt3 += ' --normalizeUsing %s' % (args['normalizeUsing'])
 
     ## cmd
     cmd = ' '.join([bamcoverage_exe, opt1, opt2, opt3])
@@ -834,7 +918,6 @@ def bam2bw(bam, path_out, scale=1, **args):
 
     ## return
     return bw_file
-
 
 
 ################################################################################
@@ -886,6 +969,9 @@ class Genome(object):
             genome_path = os.path.join(str(pathlib.Path.home()), 'data', 'genome')
         self.genome_path = genome_path
 
+        if not supportedGenome(genome):
+            log.error('genome not supported: {}'.foramt(genome))
+
 
     def get_fa(self):
         """Get the fasta file of specific genome
@@ -893,6 +979,10 @@ class Genome(object):
         also check ".gz" file
         """
         fa = os.path.join(self.genome_path, self.genome, 'bigZips', self.genome + '.fa')
+        if not os.path.exists(fa):
+            # gencode version
+            fa = os.path.join(self.genome_path, self.genome, 'fasta', self.genome + '.fa')
+
         fa_gz = fa + '.gz'
         if not os.path.exists(fa):
             if os.path.exists(fa_gz):
@@ -912,12 +1002,17 @@ class Genome(object):
         or using UCSC tool: fetchChromSizes
         fetchChromSizes hg39 > hg38.chrom.sizes
         """
-        fa_size = os.path.join(self.genome_path, self.genome, 'bigZips', 
-            self.genome + '.chrom.sizes')
+        fa = self.get_fa()
+        fa_size = fa + '.chrom.sizes'
+
         if not os.path.exists(fa_size):
-            log.info('Downloading chrom.sizes from UCSC')
-            url = 'http://hgdownload.cse.ucsc.edu/goldenPath/%s/bigZips/%s.chrom.sizes' % self.genome
-            download(url, fa_size)
+            # log.info('Downloading chrom.sizes from UCSC')
+            # url = 'http://hgdownload.cse.ucsc.edu/goldenPath/%s/bigZips/%s.chrom.sizes' % self.genome
+            # download(url, fa_size)
+            log.warning('file not exists, run samtools faidx to generate it')
+            pysam.faidx(fa) # create *.fa.fai
+            os.rename(fa + '.fai', fa_size)
+
         return fa_size
 
 
@@ -1045,9 +1140,9 @@ class Genome(object):
         return p
 
 
-    def gene_bed(self, version='ucsc', rmsk=False):
+    def gene_bed(self, version='refseq', rmsk=False):
         """Return the gene annotation in BED format
-        support UCSC, ensembl version
+        support UCSC, ensembl, gencode
         """
         if rmsk:
             suffix = '.rmsk.bed'
@@ -1060,21 +1155,46 @@ class Genome(object):
         return g
 
 
-    def gene_gtf(self, version='ucsc'):
+    def gene_gtf(self, version='refseq'):
         """Return the gene annotation in GTF format
-        support UCSC, ensembl version
+        support refseq, ensembl, gencode
         """
-        if version.lower() == 'ucsc':
-            suffix = '.refseq.gtf'
-        elif version.lower() == 'ensembl':
-            suffix = '.ensembl.gtf'
-        else:
-            suffix = '.gtf'
-        g = os.path.join(self.genome_path, self.genome, 'annotation_and_repeats',
-            self.genome + suffix)
-        if not os.path.exists(g):
-                g = None
-        return g
+        version = version.lower() #
+
+
+        gtf = os.path.join(
+            self.genome_path, 
+            self.genome, 
+            'annotation_and_repeats',
+            self.genome + '.' + version + '.gtf')
+        # print('AAAA1')
+        # print(gtf)
+
+        if not os.path.exists(gtf):
+            gtf = os.path.join(
+            self.genome_path, 
+            self.genome, 
+            'gtf',
+            self.genome + '.' + version + '.gtf')
+        # print('AAAA2')
+        # print(gtf)
+
+        if not os.path.exists(gtf):
+            gtf = None
+        # print('AAAA3')
+        # print(gtf)
+
+        # if version.lower() == 'ucsc':
+        #     suffix = '.refseq.gtf'
+        # elif version.lower() == 'ensembl':
+        #     suffix = '.ensembl.gtf'
+        # else:
+        #     suffix = '.gtf'
+        # g = os.path.join(self.genome_path, self.genome, 'annotation_and_repeats',
+        #     self.genome + suffix)
+        # if not os.path.exists(g):
+        #         g = None
+        return gtf
 
 
     def te_gtf(self, format='gtf'):

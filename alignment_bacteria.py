@@ -62,7 +62,7 @@ class Kraken2(object):
     """
 
     def __init__(self, input, outdir, kraken2_db, kraken2_exe=None, 
-        threads=16, unmap_file=None, overwrite=False):
+        threads=16, save_out=False, unmap_file=None, overwrite=False):
         """retrieve the input fastq file, outdir director,
         check kraken2 from your PATH
         specify db_path
@@ -107,8 +107,11 @@ class Kraken2(object):
         kraken2_stat = os.path.join(outdir, prefix + '.kraken2.stat')
 
         ## extra args
-        args += ' --db %s --threads %d --use-names --output %s --report %s' % (kraken2_db,
-            threads, kraken2_output, kraken2_report)
+        args += ' --db %s --threads %d --use-names --report %s' % (kraken2_db,
+            threads, kraken2_report)
+
+        # if save_out:
+        args += ' --output %s' % kraken2_output
 
         # ## prepare cmd
         # cmd = '%s %s --threads %d --use-names --db %s --output %s --report %s %s' % (kraken2_exe, 
@@ -326,7 +329,7 @@ class Kraken2(object):
         # sys.exit(cmd)
         ## run
         logging.info('Running Kraken2')
-        if os.path.exists(self.kraken2_output) and os.path.exists(self.kraken2_report) and self.overwrite is False:
+        if os.path.exists(self.kraken2_stat) and os.path.exists(self.kraken2_report) and self.overwrite is False:
             logging.info('Kraken2 output exists, skipped ...')
         else:
             with open(self.kraken2_log, 'wt') as fo:
@@ -433,3 +436,4 @@ class Kraken2(object):
 # Kraken2(fq, out, db).run()
 # Kraken2(fq, out, db).report()
 # Kraken2(fq, out, db).stat()
+

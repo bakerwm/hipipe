@@ -55,8 +55,8 @@ class OSS(object):
         Data_text:
         AccessKeyId: **********
         AccessKeySecret: **********
-        预设OSS路径: oss://pangoo-bj/customer-*********/
-        区域: 华北2(北京) oss-cn-beijing.aliyuncs.com
+        oss://pangoo-bj/customer-*********/
+        oss-cn-beijing.aliyuncs.com
 
         arguments:
         ki: AccessKeyId
@@ -257,10 +257,12 @@ class OSSList(object):
                     dd[acc_id]['folder_url'] = folder_url
                     dd[acc_id]['bucket'] = bucket
                     dd[acc_id]['folder_name'] = folder_name
-                if '区域' in line:
+                if 'region' in line:
                     # 区域: 华北2(北京)
-                    region = line.rstrip().split(' ')[1]
-                    region = region.rstrip().split('(')[0]
+                    # region: China North 2
+                    region = line.strip().split(':')[1]
+                    region = region.strip()
+                    # region = region.strip().split('(')[0]
                     dd[acc_id]['endpoint'] = self.get_endpoint(region)
         return dd
 

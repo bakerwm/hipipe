@@ -10,9 +10,11 @@ import os
 import sys
 import re
 import gzip
+import pysam
 import subprocess
 import argparse
 import logging
+
 
 logging.basicConfig(
     format='[%(asctime)s %(levelname)s] %(message)s',
@@ -32,14 +34,45 @@ def parse_arguments():
         help='List of FASTQ files (R1)')
     parser.add_argument('--fq2', nargs='+', type=str, required=True,
         help='List of FASTQ files (R2)')
-    parser.add_argument('--out-dir', dest='out_dir', required=True,
+    parser.add_argument('-o', '--out-dir', dest='out_dir', required=True,
         help='Output directory')
-    parser.add_argument('--frag-length', type=int, default=500, dest='frag_length',
-	help='The length of the fragment of library (insert). default: 500')
+    parser.add_argument('--frag-length', type=int, default=0, 
+        dest='frag_length', help='The length of the fragment of \
+        library (insert size), 0=(samtools stats). [0]')
     parser.add_argument('--threads', type=int, default=1,
         help='Number of threads to use')
     args = parser.parse_args()
     return args
+
+
+def prep_data(genome='dm3'):
+    """Only support dm3, dm6, now
+    Input: bwa_index, te_fa, te_anno
+    """
+    pass
+
+
+
+
+def samtools_stats(x):
+    """Extract insert size of PE BAM file
+    samtools stats {in.bam} | grep 'insert size average' 
+
+    output of command: samtools stats
+    Summary Numbers
+    grep ^SN | cut -f 2- | grep 'insert size average'
+    """
+    stat = pysam.stats('-@', '8', x)
+    d = {}
+    for line in stat.split('\n'):
+        # check
+        if not line.startswith('SN'):
+            continue
+        # stat
+        sn, group, num = line.strip().split('\t')[0:3]
+        group = group.strip(':')
+        d[group] = num
+    return d
 
 
 def readfq(fp): # this is a generator function
@@ -181,7 +214,7 @@ def bwa_pe(fq1, fq2, index, out_dir, threads=8):
         sai2 = bwa_aln(fq2, index, out_dir, threads=threads)
     
         # merge
-        cmd = 'bwa sampe {} {} {} {} {} | samtools view -@ {} -bSu | samtools sort -@ {} -o {} -'.format(
+        cmd = 'bwa sampe {} {} {} {} {} | samtools view -@ {} -Sub - | samtools sort -@ {} -o {} -'.format(
             index,
             sai1,
             sai2,
@@ -198,29 +231,33 @@ def bwa_pe(fq1, fq2, index, out_dir, threads=8):
     return bam
 
 
-def run_ins(bam, out_dir, frag_length=500):
+def run_ins(bam, out_dir, frag_length=500, threads=8):
     """Run TEMP for TE Insertion identification"""
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
     temp_dir = '/home/wangming/work/yu_2019/projects/public_data/TE_insertion/src/TEMP'
-    te_fa = '/home/wangming/data/genome/dm3/FL10B/FL10B_and_transposon/FL10B_transposon.fa'
-    te_bed = '/home/wangming/data/genome/dm3/annotation_and_repeats/te_annotation/dm3.te.bed'
+    # te_fa = '/home/wangming/data/genome/dm3/FL10B/FL10B_and_transposon/FL10B_transposon.fa'
+    # te_bed = '/home/wangming/data/genome/dm3/annotation_and_repeats/te_annotation/dm3.te.bed'
+    te_fa = '/home/wangming/data/genome/dm6/dm6_transposon/dm6_transposon.fa'
+    te_bed = '/home/wangming/data/genome/dm6/annotation_and_repeats/te_annotation/dm6.te.bed'
     te_ins_sh = os.path.join(temp_dir, 'scripts', 'TEMP_Insertion.sh')
 
-    cmd = 'bash {} -i {} -s {} -o {} -r {} -t {} -f {} -m 3 -c 30'.format(
+    cmd = 'bash {} -i {} -s {} -o {} -r {} -t {} -f {} -x 30 -m 3 -c {}'.format(
         te_ins_sh, 
         os.path.abspath(bam),
         os.path.join(temp_dir, 'scripts'),
         out_dir,
         te_fa,
         te_bed,
-        frag_length)
+        frag_length,
+        threads)
     run_shell_cmd(cmd)
 
 
-def run_te_insertion(fq1, fq2, out_dir, frag_length=500, threads=8):
-    index='/home/wangming/data/genome/dm3/bwa_index/dm3'
+def run_te_insertion(fq1, fq2, out_dir, frag_length=0, threads=8):
+    # index='/home/wangming/data/genome/dm3/bwa_index/dm3'
+    index='/home/wangming/data/genome/dm6/bwa_index/dm6'
 
     ## prepare dir
     fq_dir = os.path.join(out_dir, 'data')
@@ -240,7 +277,14 @@ def run_te_insertion(fq1, fq2, out_dir, frag_length=500, threads=8):
     bam = bwa_pe(fq1, fq2, index, aln_dir, threads=threads)
 
     ## insertion
-    run_ins(bam, te_dir, frag_length)
+    # determin the insert size
+    # if frag_length > 0, use "samtools stats"
+    # else: frag_length
+    if frag_length == 0:
+        statsDict = samtools_stats(bam)
+        frag_length = statsDict.get('insert size average', 300)
+    
+    run_ins(bam, te_dir, frag_length, threads)
     
     
 def main():
