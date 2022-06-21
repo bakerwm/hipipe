@@ -7,7 +7,7 @@ bedtools==2.25.0
 fastx_toolkit==0.0.14
 homer==4.9.1
 featureCounts==1.6.1
-numpy==1.14.0
+numpy==1.22.0
 pandas==0.22
 pathlib2==2.3.0
 biopython==1.70
